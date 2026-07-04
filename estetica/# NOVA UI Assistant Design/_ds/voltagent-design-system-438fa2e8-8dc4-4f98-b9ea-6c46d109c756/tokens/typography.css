@@ -1,0 +1,87 @@
+/* VoltAgent — Typography Tokens */
+
+/* Inter from Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+/* JetBrains Mono as SF Mono substitute */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+:root {
+  --font-sans: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+
+  /* Display */
+  --text-display-xl-size:    60px;
+  --text-display-xl-weight:  400;
+  --text-display-xl-lh:      60px;
+  --text-display-xl-ls:      -0.65px;
+
+  --text-display-lg-size:    36px;
+  --text-display-lg-weight:  400;
+  --text-display-lg-lh:      40px;
+  --text-display-lg-ls:      -0.9px;
+
+  --text-display-md-size:    24px;
+  --text-display-md-weight:  700;
+  --text-display-md-lh:      32px;
+  --text-display-md-ls:      -0.6px;
+
+  --text-display-sm-size:    20px;
+  --text-display-sm-weight:  600;
+  --text-display-sm-lh:      28px;
+  --text-display-sm-ls:      0;
+
+  /* Eyebrow */
+  --text-eyebrow-mono-size:  14px;
+  --text-eyebrow-mono-weight:600;
+  --text-eyebrow-mono-lh:    20px;
+  --text-eyebrow-mono-ls:    2.52px;
+
+  --text-eyebrow-lg-size:    18px;
+  --text-eyebrow-lg-weight:  600;
+  --text-eyebrow-lg-lh:      28px;
+  --text-eyebrow-lg-ls:      0.45px;
+
+  /* Body */
+  --text-body-lg-size:       18px;
+  --text-body-lg-weight:     400;
+  --text-body-lg-lh:         28px;
+
+  --text-body-md-size:       16px;
+  --text-body-md-weight:     400;
+  --text-body-md-lh:         26px;
+
+  --text-body-md-strong-size:   16px;
+  --text-body-md-strong-weight: 600;
+  --text-body-md-strong-lh:     24px;
+
+  --text-body-sm-size:       14px;
+  --text-body-sm-weight:     400;
+  --text-body-sm-lh:         20px;
+
+  --text-body-sm-strong-size:   14px;
+  --text-body-sm-strong-weight: 600;
+  --text-body-sm-strong-lh:     23px;
+
+  /* Caption */
+  --text-caption-size:       12px;
+  --text-caption-weight:     400;
+  --text-caption-lh:         16px;
+
+  --text-caption-strong-size:   12px;
+  --text-caption-strong-weight: 500;
+  --text-caption-strong-lh:     16px;
+
+  /* Code */
+  --text-code-size:          13px;
+  --text-code-weight:        400;
+  --text-code-lh:            18px;
+
+  --text-code-strong-size:   13px;
+  --text-code-strong-weight: 550;
+  --text-code-strong-lh:     16px;
+
+  /* Button */
+  --text-button-md-size:     16px;
+  --text-button-md-weight:   600;
+  --text-button-md-lh:       24px;
+}

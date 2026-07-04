@@ -1,0 +1,53 @@
+apps:
+  blender:
+    - "E:\\blender 5.1.2\\blender.exe"
+    - "C:\\Program Files\\Blender Foundation\\Blender 4.5\\blender.exe"
+    - "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Blender\\blender.exe"
+  zbrush:
+    - "C:\\Program Files\\Maxon ZBrush 2024\\ZBrush.exe"
+  painter:
+    - "D:\\SteamLibrary\\steamapps\\common\\Substance 3D Painter 2026\\Adobe Substance 3D Painter.exe"
+  touchdesigner:
+    - "G:\\touch_designer\\TouchDesigner\\TouchDesigner.exe"
+  figma:
+    - "C:\\Users\\mario\\AppData\\Local\\Figma\\Figma.exe"
+  antigravity:
+    - "C:\\Users\\mario\\AppData\\Local\\Programs\\antigravity\\Antigravity.exe"
+  ide:
+    - "D:\\antigravity\\Antigravity IDE\\_\\Antigravity IDE.exe"
+  cursor:
+    - "C:\\Users\\mario\\AppData\\Local\\Programs\\cursor\\Cursor.exe"
+  windsurf:
+    - "C:\\Users\\mario\\AppData\\Local\\Programs\\Windsurf\\Windsurf.exe"
+  codigo:
+    - "C:\\Users\\mario\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe"
+  github:
+    - "C:\\Users\\mario\\AppData\\Local\\GitHubDesktop\\GitHubDesktop.exe"
+  docker:
+    - "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe"
+  ollama:
+    - "C:\\Users\\mario\\AppData\\Local\\Programs\\Ollama\\ollama app.exe"
+  obs:
+    - "C:\\Program Files (x86)\\Steam\\steamapps\\common\\OBS Studio\\obs64.exe"
+  centro:
+    - "D:\\OBSBOT Center\\OBSBOTCenter.exe"
+  chrome:
+    - "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+  navegador:
+    - "C:\\Users\\mario\\AppData\\Local\\Programs\\Opera GX\\launcher.exe"
+  edge:
+    - "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+  comet:
+    - "C:\\Users\\mario\\AppData\\Local\\Perplexity\\Comet\\Application\\Comet.exe"
+  notas:
+    - "C:\\Users\\mario\\AppData\\Local\\Programs\\Obsidian\\Obsidian.exe" # assuming path if uninstalled/reinstalled
+  mapa mental:
+    - "C:\\Users\\mario\\AppData\\Local\\Programs\\Xmind\\Xmind.exe"
+  wps:
+    - "C:\\Users\\mario\\AppData\\Local\\Kingsoft\\WPS Office\\ksolaunch.exe"
+  anydesk:
+    - "C:\\Program Files (x86)\\AnyDesk\\AnyDesk.exe"
+  discord:
+    - "C:\\Users\\mario\\AppData\\Local\\Discord\\Update.exe --processStart Discord.exe"
+  epic:
+    - "C:\\Program Files (x86)\\Epic Games\\Launcher\\Portal\\Binaries\\Win32\\EpicGamesLauncher.exe"

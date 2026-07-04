@@ -1,0 +1,14 @@
+/* VoltAgent — Elevation / Shadow Tokens */
+:root {
+  /* Level 0 — Flat: no shadow */
+  --shadow-flat: none;
+
+  /* Level 1 — Hairline: 1px solid border (applied via border, not box-shadow) */
+  --border-hairline: 1px solid var(--color-hairline);
+
+  /* Level 2 — Hover glow */
+  --shadow-glow: 0 0 15px rgba(92, 88, 85, 0.2);
+
+  /* Level 3 — Modal stack */
+  --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(148, 163, 184, 0.1) inset;
+}

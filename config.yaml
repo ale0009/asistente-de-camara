@@ -1,0 +1,62 @@
+# Configuración General de NOVA
+
+general:
+  name: "NOVA"
+  language: "es"
+  theme: "dark"
+  start_with_windows: true
+  start_obsbot_center: true
+  obsbot_path: "D:\\OBSBOT Center\\bin\\OBSBOT_Main.exe"
+
+camera:
+  # El índice de la cámara. 
+  # 0 suele ser tu cámara web principal (OBSBOT).
+  # 1 o 2 suele ser la Cámara Virtual u otras cámaras (como tu celular).
+  camera_index: 0
+  
+  device_name: "OBSBOT Tiny 3 Lite"
+  osc_host: "127.0.0.1"
+  osc_port: 16284
+  resolution: "640x360"
+  tracking_speed: "Standard"
+
+voice:
+  # ─── Wake Word (openWakeWord — 100% local, sin API key) ───────────────────
+  # Modelos disponibles preinstalados: hey_jarvis, alexa, hey_mycroft, etc.
+  # Para entrenar "hey_nova" gratis: https://openWakeWord.com
+  # Si entrenas uno propio, coloca el .onnx en assets/ y pon la ruta aquí.
+  wake_word_models:
+    - "hey_jarvis"   # Modelo descargado localmente — 100% offline, sin API key
+    # Alternativas disponibles offline: alexa, hey_mycroft, hey_rhasspy, timer, weather
+    # Para un wake word personalizado "hey_nova" entrenar gratis en: https://openWakeWord.com
+  wake_threshold: 0.5       # Sensibilidad (0.0 a 1.0)
+  silence_limit_sec: 1.5    # Segundos de silencio para cortar el comando
+
+  # ─── Dispositivo de entrada de Audio ──────────────────────────────────────
+  # Deja mic_index en null para que NOVA use automáticamente el micrófono
+  # que tengas configurado como predeterminado en Windows (OBSBOT o tus audífonos).
+  mic_index: 1
+
+
+  # ─── STT: Whisper local ───────────────────────────────────────────────────
+  # Modelos disponibles: tiny, base, small, medium, large
+  # ("small" es el mejor balance tamaño/precisión para español)
+  stt_model: "small"
+  stt_language: "es"
+
+  # ─── TTS: edge-tts (voces de Microsoft, sin internet) ────────────────────
+  tts_voice: "es-CO-SalomeNeural"
+  tts_rate: "+0%"
+  tts_volume: "+0%"
+
+gestures:
+  enabled: true
+  sensitivity: "medium"
+  activation_time: 0.8
+
+obsidian:
+  vault_path: "D:\\Documentos\\Obsidian Vault"
+  nova_folder: "NOVA"
+  log_voice_commands: true
+  log_gestures: false
+  create_daily_note: true
