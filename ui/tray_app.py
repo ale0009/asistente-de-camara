@@ -34,6 +34,23 @@ class NovaTrayApp:
         self.action_test_ui.triggered.connect(self.test_listening_ui)
         self.menu.addAction(self.action_test_ui)
         
+        # Submenú Modos de Escena
+        self.menu_modes = QMenu("Modos de Escena", self.menu)
+        
+        self.action_mode_pres = QAction("🎥 Modo Presentación", self.menu_modes)
+        self.action_mode_pres.triggered.connect(lambda: self._trigger_mode("modo presentación"))
+        self.menu_modes.addAction(self.action_mode_pres)
+
+        self.action_mode_work = QAction("💻 Modo Trabajo", self.menu_modes)
+        self.action_mode_work.triggered.connect(lambda: self._trigger_mode("modo trabajo"))
+        self.menu_modes.addAction(self.action_mode_work)
+
+        self.action_mode_rest = QAction("🌙 Modo Descanso / Privacidad", self.menu_modes)
+        self.action_mode_rest.triggered.connect(lambda: self._trigger_mode("modo descanso"))
+        self.menu_modes.addAction(self.action_mode_rest)
+
+        self.menu.addMenu(self.menu_modes)
+
         self.menu.addSeparator()
         self.action_exit = QAction("Salir")
         self.action_exit.triggered.connect(self.exit_app)
@@ -42,6 +59,12 @@ class NovaTrayApp:
 
         # También abrir el panel con click o doble click
         self.tray_icon.activated.connect(self.on_tray_activated)
+
+    def _trigger_mode(self, mode_command: str):
+        if self.dispatcher:
+            self.dispatcher.process_command(mode_command)
+        else:
+            logger.warning("Dispatcher no disponible para cambiar de modo.")
 
     def on_tray_activated(self, reason):
         if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):

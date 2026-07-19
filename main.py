@@ -266,6 +266,17 @@ class NovaAssistant:
         # Log de inicio
         self.logger_db.log_action("Sistema", "NOVA iniciada exitosamente")
         
+        # Verificación asíncrona de salud de Ollama e inicio de UI
+        def _check_health():
+            time.sleep(2.5)
+            ollama_ok = self.ollama.check_connection() if self.ollama else False
+            import ui.panel_widget as pw
+            if ollama_ok:
+                pw.show_toast("NOVA Sistema", "Cámara y Ollama IA conectados ⚡", success=True)
+            else:
+                pw.show_toast("NOVA Sistema", "Cámara lista. Ollama fuera de línea.", success=False)
+        threading.Thread(target=_check_health, daemon=True, name="NOVA-HealthCheck").start()
+
         # Iniciar UI. on_exit se llama desde el menú "Salir" de la bandeja,
         # ANTES de que Qt cierre la aplicación — es la única vía real de
         # cierre hoy (setQuitOnLastWindowClosed(False) impide que cerrar el
