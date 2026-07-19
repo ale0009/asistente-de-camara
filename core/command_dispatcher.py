@@ -62,6 +62,16 @@ class CommandDispatcher:
             "preset 3": lambda: self.osc.trigger_preset(3),
             "mira posición 3": lambda: self.osc.trigger_preset(3),
             "mira a la posición 3": lambda: self.osc.trigger_preset(3),
+            "modo presentación": self._activate_presentation_mode,
+            "modo presentacion": self._activate_presentation_mode,
+            "modo stream": self._activate_presentation_mode,
+            "modo reunión": self._activate_presentation_mode,
+            "modo reunion": self._activate_presentation_mode,
+            "modo trabajo": self._activate_work_mode,
+            "modo escritorio": self._activate_work_mode,
+            "modo descanso": self._activate_rest_mode,
+            "modo privacidad": self._activate_rest_mode,
+            "modo silencio": self._activate_rest_mode,
         }
         
         # Mapeo simple de comandos de sistema
@@ -75,6 +85,45 @@ class CommandDispatcher:
             "minimiza todo": lambda: self.system.show_desktop() if self.system else "Sin control de sistema",
             "siguiente ventana": lambda: self.system.next_window() if self.system else "Sin control de sistema",
         }
+
+    def _activate_presentation_mode(self) -> str:
+        """Modo Presentación / Stream / Reunión: despierta la cámara, enciende tracking y acomoda el zoom."""
+        self.osc.wake_camera()
+        self.osc.track_human()
+        self.osc.set_zoom(0.0)
+        try:
+            from ui.panel_widget import show_toast
+            show_toast("Modo Escena", "Modo Presentación Activado 🎥", success=True)
+        except Exception:
+            pass
+        return "Modo Presentación activado: cámara despierta y tracking encendido."
+
+    def _activate_work_mode(self) -> str:
+        """Modo Trabajo / Escritorio: apaga tracking y centra el gimbal."""
+        self.osc.stop_tracking()
+        self.osc.gimbal_reset()
+        try:
+            from ui.panel_widget import show_toast
+            show_toast("Modo Escena", "Modo Trabajo Activado 💻", success=True)
+        except Exception:
+            pass
+        return "Modo Trabajo activado: tracking pausado y gimbal centrado."
+
+    def _activate_rest_mode(self) -> str:
+        """Modo Descanso / Privacidad: apaga tracking y pone la cámara a dormir."""
+        self.osc.stop_tracking()
+        self.osc.sleep_camera()
+        if self.system:
+            try:
+                self.system.mute_volume()
+            except Exception:
+                pass
+        try:
+            from ui.panel_widget import show_toast
+            show_toast("Modo Escena", "Modo Privacidad / Descanso Activado 🌙", success=True)
+        except Exception:
+            pass
+        return "Modo Descanso activado: cámara suspendida."
 
     def _load_yaml(self, path):
         try:
@@ -100,7 +149,9 @@ class CommandDispatcher:
         for cmd, action in self.camera_commands.items():
             if cmd in text:
                 logger.info(f"Ejecutando comando de cámara: {cmd}")
-                action()
+                res = action()
+                if res and isinstance(res, str):
+                    return res
                 return f"Comando de cámara {cmd} ejecutado"
 
         # 2. Comandos de Sistema (Capturas, volumen)

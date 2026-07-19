@@ -118,3 +118,25 @@ def test_camera_preset_commands(tmp_path):
 
     osc.trigger_preset.assert_called_once_with(1)
     assert "posición 1" in reply
+
+
+def test_scene_modes_commands(tmp_path):
+    osc = Mock()
+    system = Mock()
+    dispatcher = make_dispatcher(tmp_path, osc=osc, system=system)
+
+    reply_pres = dispatcher.process_command("modo presentación")
+    osc.wake_camera.assert_called_once()
+    osc.track_human.assert_called_once()
+    osc.set_zoom.assert_called_once_with(0.0)
+    assert "Modo Presentación" in reply_pres
+
+    reply_work = dispatcher.process_command("modo trabajo")
+    osc.stop_tracking.assert_called_once()
+    osc.gimbal_reset.assert_called_once()
+    assert "Modo Trabajo" in reply_work
+
+    reply_rest = dispatcher.process_command("modo descanso")
+    osc.sleep_camera.assert_called_once()
+    system.mute_volume.assert_called_once()
+    assert "Modo Descanso" in reply_rest
