@@ -140,3 +140,9 @@ def test_scene_modes_commands(tmp_path):
     osc.sleep_camera.assert_called_once()
     system.mute_volume.assert_called_once()
     assert "Modo Descanso" in reply_rest
+
+
+def test_obs_commands(tmp_path):
+    dispatcher = make_dispatcher(tmp_path)
+    reply = dispatcher.process_command("inicia grabación")
+    assert "OBS Studio" in reply

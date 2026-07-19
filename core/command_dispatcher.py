@@ -87,6 +87,12 @@ class CommandDispatcher:
             "abre blender": lambda: self._open_app("blender"),
             "modo blender": lambda: self._open_app("blender"),
             "abre reporte de addons": lambda: self.process_command("qué dice mi reporte de addons"),
+            "abre obs": lambda: self._open_app("obs"),
+            "modo obs": lambda: self._open_app("obs"),
+            "modo transmisión": lambda: self._activate_presentation_mode(),
+            "modo transmision": lambda: self._activate_presentation_mode(),
+            "inicia grabación": lambda: "Iniciando grabación en OBS Studio",
+            "detén grabación": lambda: "Deteniendo grabación en OBS Studio",
         }
 
     def _activate_presentation_mode(self) -> str:

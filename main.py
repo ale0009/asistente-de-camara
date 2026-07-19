@@ -271,6 +271,9 @@ class NovaAssistant:
         # Log de inicio
         self.logger_db.log_action("Sistema", "NOVA iniciada exitosamente")
         
+        # Registrar atajo global Ctrl+Alt+N
+        self._setup_global_hotkey()
+
         # Verificación asíncrona de salud de Ollama e inicio de UI
         def _check_health():
             time.sleep(2.5)
@@ -281,6 +284,37 @@ class NovaAssistant:
             else:
                 pw.show_toast("NOVA Sistema", "Cámara lista. Ollama fuera de línea.", success=False)
         threading.Thread(target=_check_health, daemon=True, name="NOVA-HealthCheck").start()
+
+    def _setup_global_hotkey(self):
+        """Registra un hotkey global en Windows (Ctrl+Alt+N) para activar la escucha de NOVA."""
+        try:
+            import ctypes
+            import ctypes.wintypes
+            
+            def _hotkey_loop():
+                user32 = ctypes.windll.user32
+                HOTKEY_ID = 101
+                MOD_ALT = 0x0001
+                MOD_CONTROL = 0x0002
+                VK_N = 0x4E  # Letra 'N'
+
+                if user32.RegisterHotKey(None, HOTKEY_ID, MOD_CONTROL | MOD_ALT, VK_N):
+                    logger.info("Atajo global registrado: Ctrl+Alt+N para activar NOVA")
+                    msg = ctypes.wintypes.MSG()
+                    while self.is_running:
+                        if user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
+                            if msg.message == 0x0312:  # WM_HOTKEY
+                                logger.info("Atajo global Ctrl+Alt+N presionado.")
+                                self.on_wake_word()
+                            user32.TranslateMessage(ctypes.byref(msg))
+                            user32.DispatchMessageW(ctypes.byref(msg))
+                    user32.UnregisterHotKey(None, HOTKEY_ID)
+                else:
+                    logger.warning("No se pudo registrar el atajo global Ctrl+Alt+N.")
+
+            threading.Thread(target=_hotkey_loop, daemon=True, name="NOVA-GlobalHotkey").start()
+        except Exception as e:
+            logger.warning(f"Error configurando atajo global: {e}")
 
         # Iniciar UI. on_exit se llama desde el menú "Salir" de la bandeja,
         # ANTES de que Qt cierre la aplicación — es la única vía real de
