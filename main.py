@@ -99,9 +99,11 @@ class NovaAssistant:
         self.gesture_commands = self._load_yaml("presets/gestures.yaml").get('gestures', {})
 
         # Conectar callbacks
+        import ui.panel_widget as pw
         self.voice.on_wake_word_detected = self.on_wake_word
         self.voice.on_command_recognized = self.on_voice_command
         self.voice.on_voice_engine_failed = self.on_voice_engine_failed
+        self.voice.on_audio_level_updated = pw.update_audio_level_safe
         self.gestures.on_gesture_detected = self.on_gesture
         self.osc.on_status_updated = self.on_osc_status_updated
 
@@ -192,12 +194,15 @@ class NovaAssistant:
             self.voice.speak(respuesta)
 
     def on_gesture(self, gesture: str):
-        """Se ejecuta cuando MediaPipe detecta un gesto sostenido.
+        """Se ejecuta cuando MediaPipe detecta un gesto sostenido o dinámico."""
+        if gesture and gesture.startswith("zoom_"):
+            try:
+                val = float(gesture.split("_")[1])
+                self.osc.set_zoom(val)
+            except Exception:
+                pass
+            return
 
-        El gesto se traduce a un comando de texto vía presets/gestures.yaml
-        y se procesa exactamente igual que un comando de voz — así el mapeo
-        gesto→acción se edita en el YAML, sin tocar código.
-        """
         command_text = self.gesture_commands.get(gesture)
         if not command_text:
             logger.warning(f"Gesto '{gesture}' sin comando asignado en presets/gestures.yaml")

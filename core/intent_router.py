@@ -13,13 +13,15 @@ responde ÚNICAMENTE con un JSON válido, sin texto adicional antes o después,
 con esta forma:
 
 {{"action": "search_files", "query": "..."}}
+{{"action": "read_document", "target": "...", "question": "..."}}
 {{"action": "write_note", "title": "...", "content": "..."}}
 {{"action": "run_command", "command": "..."}}
 {{"action": "open_app", "app_name": "..."}}
 {{"action": "answer", "text": "..."}}
 
 Reglas:
-- "search_files": el usuario pide buscar/encontrar un archivo en el equipo.
+- "search_files": el usuario pide buscar/encontrar la ubicación de un archivo en el equipo.
+- "read_document": el usuario pide leer, consultar, resumir o preguntar qué dice un documento, nota de Obsidian o reporte específico (ej. "qué dice el reporte de addons", "lee la nota X").
 - "write_note": el usuario pide anotar/apuntar/tomar nota de algo.
 - "run_command": el usuario pide algo que coincide en significado con uno de
   estos comandos ya disponibles (aunque lo diga con otras palabras). Copia el
@@ -76,6 +78,8 @@ class IntentRouter:
 
         if action == "search_files":
             return self._handle_search(data.get("query", ""))
+        if action == "read_document":
+            return self._handle_read_document(data.get("target", ""), data.get("question", text))
         if action == "write_note":
             return self._handle_note(data.get("title", "Nota de voz"), data.get("content", ""))
         if action == "run_command":
@@ -127,3 +131,18 @@ class IntentRouter:
         if not path:
             return "No tengo configurado un vault de Obsidian para anotar."
         return f"Anotado en {os.path.basename(path)}"
+
+    def _handle_read_document(self, target: str, question: str = "") -> str:
+        target = (target or "").strip()
+        if not target:
+            return "¿Qué documento quieres que lea?"
+        doc_text = self.files.read_document(target)
+        if not doc_text:
+            return f"No encontré el documento '{target}' en tus carpetas autorizadas o vault de Obsidian."
+        
+        rag_prompt = (
+            f"{NOVA_IDENTITY}\n"
+            f"Con base en la siguiente información del documento:\n{doc_text}\n\n"
+            f"Responde a esta pregunta o solicitud del usuario en voz alta, de forma concisa y en español: {question or 'Resume qué dice este documento.'}"
+        )
+        return self.ollama.query(rag_prompt)

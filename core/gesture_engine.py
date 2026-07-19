@@ -134,9 +134,10 @@ class GestureEngine:
         if sum(fingers_up) == 0 and pinch_dist > 0.1:
             return "puno"
 
-        # 4. Pellizco
-        if sum(fingers_up) == 0 and pinch_dist < 0.05:
-            return "pellizco"
+        # 4. Pellizco / Zoom continuo
+        if sum(fingers_up) <= 1 and pinch_dist < 0.20:
+            zoom_val = int(max(0, min(100, (pinch_dist - 0.03) / 0.15 * 100)))
+            return f"zoom_{zoom_val}"
 
         # 5. Paz (V) - Índice y Medio arriba
         if fingers_up == [1, 1, 0, 0]:
@@ -150,6 +151,11 @@ class GestureEngine:
 
     def _debounce_gesture(self, current_gesture):
         """Asegura que un gesto se mantenga unos frames antes de dispararlo."""
+        if current_gesture and current_gesture.startswith("zoom_"):
+            if self.on_gesture_detected:
+                self.on_gesture_detected(current_gesture)
+            return
+
         if current_gesture == self.last_gesture and current_gesture is not None:
             self.frames_with_same_gesture += 1
 

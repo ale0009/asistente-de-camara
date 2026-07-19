@@ -56,3 +56,27 @@ class FileTools:
 
         logger.info(f"Nota escrita en {file_path}")
         return file_path
+
+    def read_document(self, target: str) -> str:
+        """Lee el contenido de un archivo Markdown o de texto si está en carpetas autorizadas o vault."""
+        target_lower = target.lower().strip()
+        
+        search_dirs = list(self.allowed_folders)
+        if self.vault_path and self.vault_path not in search_dirs:
+            search_dirs.append(self.vault_path)
+
+        for folder in search_dirs:
+            if not os.path.isdir(folder):
+                continue
+            for dirpath, _dirnames, filenames in os.walk(folder):
+                for name in filenames:
+                    if target_lower in name.lower() or name.lower().startswith(target_lower):
+                        file_path = os.path.join(dirpath, name)
+                        try:
+                            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                                content = f.read(4000)
+                            logger.info(f"Documento leído para RAG: {file_path}")
+                            return f"--- Documento '{name}' ---\n{content}"
+                        except Exception as e:
+                            logger.error(f"Error leyendo archivo {file_path}: {e}")
+        return None

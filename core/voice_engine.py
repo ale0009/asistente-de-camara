@@ -122,6 +122,12 @@ class VoiceEngine:
         # 3. PyAudio
         self.pa = pyaudio.PyAudio()
 
+        # Callbacks para la UI
+        self.on_wake_word_detected = None
+        self.on_command_recognized = None
+        self.on_voice_engine_failed = None
+        self.on_audio_level_updated = None
+
     # ──────────────────────────────────────────────────────────────────────────
     # Escucha en segundo plano
     # ──────────────────────────────────────────────────────────────────────────
@@ -184,6 +190,11 @@ class VoiceEngine:
             while self.is_running:
                 raw = stream.read(OWW_CHUNK, exception_on_overflow=False)
                 audio_np = np.frombuffer(raw, dtype=np.int16)
+
+                if self.on_audio_level_updated and len(audio_np) > 0:
+                    rms = np.sqrt(np.mean(np.square(audio_np, dtype=np.float32)))
+                    level = min(1.0, float(rms / 3500.0))
+                    self.on_audio_level_updated(level)
 
                 # openWakeWord (requiere float32 normalizado)
                 if self.oww_model:

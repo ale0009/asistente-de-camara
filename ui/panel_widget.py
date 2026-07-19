@@ -87,12 +87,18 @@ class AudioWave(QWidget):
     def set_active(self, active: bool):
         self._active = active
 
+    def set_level(self, level: float):
+        import random
+        for i in range(self.bars):
+            variation = random.uniform(0.7, 1.2)
+            self._targets[i] = min(1.0, max(0.12, level * variation))
+
     def _animate(self):
         import random
         for i in range(self.bars):
             if self._active:
                 self._targets[i] = random.uniform(0.25, 1.0)
-            else:
+            elif self._targets[i] <= 0.15:
                 self._targets[i] = 0.15
             self._heights[i] += (self._targets[i] - self._heights[i]) * 0.35
         self.update()
@@ -1009,6 +1015,12 @@ def hide_listening():
         global _listening_instance
         if _listening_instance is not None:
             _listening_instance.hide_listening()
+    QTimer.singleShot(0, QApplication.instance(), _do)
+
+def update_audio_level_safe(level: float):
+    def _do():
+        if _panel_instance is not None and hasattr(_panel_instance, 'wave'):
+            _panel_instance.wave.set_level(level)
     QTimer.singleShot(0, QApplication.instance(), _do)
 
 

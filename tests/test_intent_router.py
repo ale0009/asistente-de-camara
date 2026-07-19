@@ -93,3 +93,14 @@ def test_known_commands_are_interpolated_into_prompt():
     sent_prompt = ollama.query.call_args[0][0]
     assert "sígueme" in sent_prompt
     assert "sube el volumen" in sent_prompt
+
+
+def test_route_read_document():
+    router, ollama, files, _ = make_router('{"action": "read_document", "target": "reporte_addons", "question": "¿qué dice?"}')
+    files.read_document = Mock(return_value="--- Documento 'reporte_addons.md' ---\nAddons instalados")
+    ollama.query.side_effect = ['{"action": "read_document", "target": "reporte_addons", "question": "¿qué dice?"}', "En el reporte dice que hay addons instalados."]
+
+    reply = router.route("qué dice mi reporte de addons")
+
+    files.read_document.assert_called_once_with("reporte_addons")
+    assert "addons instalados" in reply.lower()
