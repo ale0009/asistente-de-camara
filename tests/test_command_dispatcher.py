@@ -108,3 +108,13 @@ def test_falls_back_to_intent_router_for_free_form_text(tmp_path):
 
     router.route.assert_called_once()
     assert reply == "Ruteado por intención"
+
+
+def test_camera_preset_commands(tmp_path):
+    osc = Mock()
+    dispatcher = make_dispatcher(tmp_path, osc=osc)
+
+    reply = dispatcher.process_command("posición 1")
+
+    osc.trigger_preset.assert_called_once_with(1)
+    assert "posición 1" in reply

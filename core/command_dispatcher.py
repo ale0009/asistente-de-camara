@@ -50,6 +50,18 @@ class CommandDispatcher:
             "mira derecha": self.osc.look_right,
             "mira arriba": self.osc.look_up,
             "mira abajo": self.osc.look_down,
+            "posición 1": lambda: self.osc.trigger_preset(1),
+            "preset 1": lambda: self.osc.trigger_preset(1),
+            "mira posición 1": lambda: self.osc.trigger_preset(1),
+            "mira a la posición 1": lambda: self.osc.trigger_preset(1),
+            "posición 2": lambda: self.osc.trigger_preset(2),
+            "preset 2": lambda: self.osc.trigger_preset(2),
+            "mira posición 2": lambda: self.osc.trigger_preset(2),
+            "mira a la posición 2": lambda: self.osc.trigger_preset(2),
+            "posición 3": lambda: self.osc.trigger_preset(3),
+            "preset 3": lambda: self.osc.trigger_preset(3),
+            "mira posición 3": lambda: self.osc.trigger_preset(3),
+            "mira a la posición 3": lambda: self.osc.trigger_preset(3),
         }
         
         # Mapeo simple de comandos de sistema
