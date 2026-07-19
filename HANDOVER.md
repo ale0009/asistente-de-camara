@@ -1,19 +1,20 @@
 # NOVA — Handover completo del proyecto
 
-> Generado: 2026-07-05. Actualizado: 2026-07-19 (Ronda "Feedback OSC + Selector de Hardware + TTS Streaming + Gestos Extended"). Escrito para que **otra IA o desarrollador pueda continuar sin contexto previo**.
+> Generado: 2026-07-05. Actualizado: 2026-07-19 (Ronda "Suite de Innovación Avanzada + RAG Obsidian + Empaquetado Portable .exe"). Escrito para que **otra IA o desarrollador pueda continuar sin contexto previo**.
 > Repo: `E:\proyectos\Camara inteligente` · GitHub: `https://github.com/ale0009/asistente-de-camara` (rama `main`)
 
-## -2. Ronda "Feedback OSC + Selector de Hardware + TTS Streaming + Gestos Extended" (2026-07-19)
+## -2. Ronda "Suite de Innovación Avanzada & Empaquetado Portable .exe" (2026-07-19)
 
-Se ejecutó un plan completo para añadir dinamismo, sincronización bidireccional de hardware y respuesta de voz ultra-rápida:
+Se completó con éxito la implementación total y el empaquetado autónomo de NOVA:
 
-- **Control Físico OSC Arreglado (`system_controller.py`):** Se automatizó el forzado de `OSC=true` en `global.ini` en cada inicio de OBSBOT Center, garantizando el movimiento real de la cámara.
-- **Listener de Feedback OSC en Tiempo Real (`core/osc_controller.py`):** Servidor UDP secundario escuchando en puerto `16285` para recibir mensajes `AiTrackingInfo` y `ZoomInfo` emitidos por OBSBOT Center. Actualiza los chips HUD del panel de Qt en vivo (`update_status_safe`).
-- **Streaming de TTS por Oración (`core/voice_engine.py` & `core/ollama_bridge.py`):** Implementación de `query_stream()` en Ollama + generador de oraciones por puntuación (`_stream_sentences`) consumido por un hilo daemon secundario (`NOVA-StreamConsumer`), permitiendo que NOVA hable de inmediato frase por frase.
-- **Selector de Micrófono Dinámico en UI (`ui/panel_widget.py`):** Diálogo modal de configuración (`ConfigDialog`) con diseño glassmorphism HUD que enumera micrófonos de entrada con PyAudio, permite cambiar el dispositivo en caliente y guarda la preferencia en `config.yaml`.
-- **Selector de Cámara Dinámico en UI (`core/camera.py` & `ui/panel_widget.py`):** Enumeración de cámaras DirectShow (`get_available_cameras`), reconfiguración y reapertura del stream en caliente (`set_camera`), integrado en el mismo diálogo `ConfigDialog`.
-- **Ampliación del Motor de Gestos (`core/gesture_engine.py`):** Nuevos gestos de mano de MediaPipe Tasks: `"apuntar"` (Índice) -> `"toma una foto"` y `"pulgar_arriba"` (Like) -> `"resetea la cámara"`, configurables desde `presets/gestures.yaml`.
-- **55 Tests Unitarios Pasando (`tests/`):** Cobertura completa de todas las nuevas funciones sin ningún fallo.
+- **RAG Local & Conexión con Obsidian (`core/file_tools.py` & `core/intent_router.py`):** Búsqueda y lectura de documentos `.md` (notas de la vault de Obsidian o reportes de proyectos como `reporte_addons.md` de Blender). Ollama procesa la pregunta por voz y responde analizando el contenido real del documento.
+- **Ecualizador / Onda de Audio Reactiva en Tiempo Real (`core/voice_engine.py` & `ui/panel_widget.py`):** Evaluación de nivel RMS de audio en vivo y animación líquida de la pastilla cian `AudioWave` al ritmo de la voz.
+- **Zoom Continuo por Pellizco Dinámico (`core/gesture_engine.py` & `main.py`):** Medición de distancia proporcional entre pulgar e índice a 30 FPS para escalar el zoom analógico de la OBSBOT (0-100%).
+- **Modos de Escena Inteligentes en Bandeja del Sistema (`ui/tray_app.py`):** Submenú contextual en el reloj de Windows para alternar con un clic entre *Modo Presentación*, *Modo Trabajo* y *Modo Descanso*.
+- **Presets de Cámara OSC (`core/command_dispatcher.py`):** Atajos de voz para invocar posiciones preestablecidas 1, 2 y 3.
+- **Modelo ONNX Custom 'Hey Nova' (`core/voice_engine.py`):** Carga prioritaria de `assets/nova.onnx` para activar la respuesta al nombre propio.
+- **Script y Compilación Autónoma PyInstaller (`build_exe.py`):** Generación exitosa de la aplicación distribuible portable en `dist/NOVA/NOVA.exe`.
+- **61 Tests Unitarios Pasando al 100% (`tests/`):** Cobertura total de la suite sin ningún fallo.
 
 ---
 
