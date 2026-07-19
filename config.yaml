@@ -60,3 +60,15 @@ obsidian:
   log_voice_commands: true
   log_gestures: false
   create_daily_note: true
+
+assistant:
+  # Carpetas donde el asistente puede buscar archivos o escribir notas cuando
+  # le pides algo libre ("busca X", "anota Y"). Solo tú decides qué agregar
+  # aquí — nunca opera fuera de esta lista (nada de C:\Windows, Program Files, etc.).
+  allowed_folders:
+    - "C:\\Users\\mario\\Documents"
+    - "C:\\Users\\mario\\Desktop"
+    - "D:\\Documentos\\Obsidian Vault"
+  # Subcarpeta del vault de Obsidian donde se guardan las notas libres
+  # (distinto del log automático de sesión en obsidian.nova_folder/Sesiones).
+  notes_folder: "NOVA/Notas"

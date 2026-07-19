@@ -132,6 +132,37 @@ class SystemController:
             logger.error(f"No se encontró el ejecutable de OBSBOT en {exe_path}")
             return False
 
+        # Asegurar OSC=true en global.ini antes de iniciar
+        try:
+            appdata = os.environ.get("APPDATA")
+            if appdata:
+                ini_path = os.path.join(appdata, "OBSBOT_Center", "global.ini")
+                if os.path.exists(ini_path):
+                    with open(ini_path, "r", encoding="utf-8", errors="ignore") as f:
+                        lines = f.readlines()
+                    
+                    in_soft_setting = False
+                    modified = False
+                    new_lines = []
+                    for line in lines:
+                        trimmed = line.strip()
+                        if trimmed.startswith("[") and trimmed.endswith("]"):
+                            in_soft_setting = (trimmed.lower() == "[softsetting]")
+                        
+                        if in_soft_setting and trimmed.startswith("OSC="):
+                            if trimmed != "OSC=true":
+                                new_lines.append("OSC=true\n")
+                                modified = True
+                                continue
+                        new_lines.append(line)
+                    
+                    if modified:
+                        with open(ini_path, "w", encoding="utf-8") as f:
+                            f.writelines(new_lines)
+                        logger.info("Forzado OSC=true en global.ini antes de iniciar OBSBOT.")
+        except Exception as e:
+            logger.error(f"Error forzando OSC=true en global.ini: {e}")
+
         try:
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -184,7 +215,16 @@ class SystemController:
             try:
                 _, pid = win32process.GetWindowThreadProcessId(hwnd)
                 proc_name = psutil.Process(pid).name().lower()
-            except (psutil.NoSuchProcess, psutil.AccessDenied, Exception):
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                # Esperado: procesos que desaparecen o a los que no tenemos
+                # acceso mientras se enumeran las ventanas — no son errores reales.
+                return
+            except Exception as e:
+                # Antes esto se tragaba junto con los dos casos esperados de
+                # arriba (el Exception genérico los hacía redundantes),
+                # ocultando bugs reales de win32gui/win32process. Ahora se
+                # loggea para que un fallo inesperado no desaparezca en silencio.
+                logger.debug(f"Error inesperado inspeccionando ventana {hwnd}: {e}")
                 return
             if proc_name not in wanted:
                 return

@@ -21,6 +21,7 @@ Flujo:
 import asyncio
 import logging
 import os
+import queue
 import struct
 import tempfile
 import threading
@@ -30,6 +31,7 @@ import wave
 import edge_tts
 import numpy as np
 import pyaudio
+import pygame
 import webrtcvad
 import whisper
 from openwakeword.model import Model as WakeWordModel
@@ -75,10 +77,16 @@ class VoiceEngine:
         # Estado
         self.is_running = False
         self._listen_thread: threading.Thread | None = None
+        self.tts_queue = queue.Queue()
+        self._tts_worker: threading.Thread | None = None
 
         # Callbacks (se asignan desde main.py)
         self.on_wake_word_detected = None
         self.on_command_recognized = None
+        # Se dispara si el hilo de escucha no puede arrancar (ej. mic_index
+        # inválido) — sin esto, el hilo moría en silencio y NOVA se quedaba
+        # sin voz el resto de la sesión sin ningún aviso visible.
+        self.on_voice_engine_failed = None
 
     # ──────────────────────────────────────────────────────────────────────────
     # Inicialización de modelos pesados (ejecutar en hilo separado si se desea)
@@ -129,6 +137,13 @@ class VoiceEngine:
         self._listen_thread.start()
         logger.info("Escucha de wake word iniciada.")
 
+        # Iniciar worker de TTS
+        self._tts_worker = threading.Thread(
+            target=self._tts_worker_loop, daemon=True, name="NOVA-TTS-Worker"
+        )
+        self._tts_worker.start()
+        logger.info("Worker de TTS iniciado.")
+
     def _open_stream(self) -> pyaudio.Stream:
         mic_index = self.config.get("mic_index", None)
         if mic_index is not None:
@@ -145,7 +160,24 @@ class VoiceEngine:
 
     def _listen_loop(self):
         """Bucle principal: detecta wake word → graba comando → procesa con Whisper."""
-        stream = self._open_stream()
+        try:
+            stream = self._open_stream()
+        except Exception as exc:
+            # Antes esto escapaba sin capturar (estaba fuera del try/except
+            # de abajo): el hilo moría en silencio vía el excepthook por
+            # defecto y NOVA se quedaba sin voz el resto de la sesión sin
+            # ningún aviso. Ahora se loggea y se avisa a quien esté escuchando
+            # (main.py lo conecta a un toast visible en la UI).
+            logger.error("No se pudo abrir el micrófono (mic_index=%s): %s",
+                         self.config.get("mic_index"), exc)
+            if self.on_voice_engine_failed:
+                self.on_voice_engine_failed(str(exc))
+            return
+
+        # Se guarda en self.stream (no solo local) para que stop() pueda
+        # desbloquear una lectura en curso vía stream.stop_stream() en vez
+        # de arriesgarse a llamar pa.terminate() con este hilo todavía vivo.
+        self.stream = stream
         logger.info("Stream de audio abierto.")
 
         try:
@@ -263,42 +295,148 @@ class VoiceEngine:
     # TTS con edge-tts (sin internet — usa los motores de Windows)
     # ──────────────────────────────────────────────────────────────────────────
     def speak(self, text: str):
-        """Sintetiza voz y la reproduce. No bloquea el hilo principal."""
-        threading.Thread(
-            target=self._speak_sync, args=(text,), daemon=True,
-            name="NOVA-TTS"
-        ).start()
+        """Agrega el texto a la cola de reproducción de voz."""
+        if text and text.strip():
+            self.tts_queue.put(text)
+
+    def _tts_worker_loop(self):
+        """Bucle consumidor en segundo plano para reproducir el audio de forma secuencial."""
+        while True:
+            try:
+                # Si no está en ejecución y la cola está vacía, terminamos el hilo
+                if not self.is_running and self.tts_queue.empty():
+                    break
+                text = self.tts_queue.get(timeout=0.5)
+                if text is None:
+                    self.tts_queue.task_done()
+                    break
+                self._speak_sync(text)
+                self.tts_queue.task_done()
+            except queue.Empty:
+                continue
+            except Exception as e:
+                logger.error(f"Error en bucle worker de TTS: {e}")
 
     def _speak_sync(self, text: str):
-        async def _run():
-            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-                tmp_path = tmp.name
-            try:
-                communicate = edge_tts.Communicate(text, self.tts_voice)
-                await communicate.save(tmp_path)
-                # Reproducir con el reproductor por defecto de Windows
-                os.startfile(tmp_path)
-                # Esperar un momento para que el reproductor cargue antes de borrar
-                time.sleep(3)
-            except Exception as exc:
-                logger.error("Error en edge-tts: %s", exc)
-            finally:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
+        async def _generate(path: str):
+            communicate = edge_tts.Communicate(text, self.tts_voice)
+            await communicate.save(path)
 
-        asyncio.run(_run())
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            asyncio.run(_generate(tmp_path))
+
+            # Reproducir con pygame.mixer y esperar de verdad a que termine
+            # (antes se usaba os.startfile + un sleep fijo de 3s, que abría el
+            # reproductor de Windows y cortaba el audio si tardaba o duraba más).
+            # pygame.mixer debe inicializarse en este mismo hilo (cada llamada
+            # a speak() corre en un hilo nuevo) — inicializarlo una sola vez en
+            # el hilo principal causaba "mixer not initialized" al reproducir.
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+            pygame.mixer.music.load(tmp_path)
+            pygame.mixer.music.play()
+            while pygame.mixer.music.get_busy():
+                time.sleep(0.1)
+            pygame.mixer.music.unload()
+        except Exception as exc:
+            logger.error("Error en edge-tts/reproducción: %s", exc)
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    def get_input_devices(self) -> dict:
+        """Devuelve un diccionario de {index: name} de los micrófonos disponibles."""
+        devices = {}
+        pa_temp = self.pa if self.pa else pyaudio.PyAudio()
+        try:
+            info = pa_temp.get_host_api_info_by_index(0)
+            numdevices = info.get('deviceCount', 0)
+            for i in range(0, numdevices):
+                device_info = pa_temp.get_device_info_by_host_api_device_index(0, i)
+                if device_info.get('maxInputChannels', 0) > 0:
+                    devices[i] = device_info.get('name')
+        except Exception as e:
+            logger.error(f"Error listando micrófonos en VoiceEngine: {e}")
+        finally:
+            if not self.pa:
+                pa_temp.terminate()
+        return devices
+
+    def set_microphone(self, index: int) -> bool:
+        """Establece el micrófono activo persistentemente y reinicia el stream en caliente."""
+        logger.info(f"Cambiando micrófono al índice: {index}")
+        self.config["mic_index"] = index
+
+        # Guardar en config.yaml de forma permanente
+        try:
+            import yaml
+            if os.path.exists("config.yaml"):
+                with open("config.yaml", "r", encoding="utf-8") as f:
+                    cfg = yaml.safe_load(f) or {}
+                
+                if "voice" not in cfg:
+                    cfg["voice"] = {}
+                cfg["voice"]["mic_index"] = index
+                
+                with open("config.yaml", "w", encoding="utf-8") as f:
+                    yaml.safe_dump(cfg, f, default_flow_style=False, allow_unicode=True)
+                logger.info("config.yaml actualizado con el nuevo mic_index.")
+        except Exception as e:
+            logger.error(f"Error guardando mic_index en config.yaml: {e}")
+
+        # Si el stream de escucha está corriendo, lo reiniciamos en caliente
+        if self.is_running and self.stream:
+            logger.info("Reiniciando stream de PyAudio con el nuevo micrófono...")
+            try:
+                self.stream.stop_stream()
+                self.stream.close()
+                self.stream = self._open_stream()
+                logger.info("Stream de PyAudio reiniciado correctamente.")
+                return True
+            except Exception as e:
+                logger.error(f"Error reiniciando stream de micrófono: {e}")
+                if self.on_voice_engine_failed:
+                    self.on_voice_engine_failed(str(e))
+                return False
+        return True
 
     # ──────────────────────────────────────────────────────────────────────────
     # Limpieza
     # ──────────────────────────────────────────────────────────────────────────
     def stop(self):
         self.is_running = False
+        # Detener worker de TTS enviando señal de parada
+        if self.tts_queue:
+            self.tts_queue.put(None)
+            if self._tts_worker and self._tts_worker.is_alive():
+                self._tts_worker.join(timeout=2)
+
         if self._listen_thread and self._listen_thread.is_alive():
             self._listen_thread.join(timeout=2)
-        if self.pa:
+
+            if self._listen_thread.is_alive():
+                # Seguía bloqueado en stream.read(); se intenta desbloquear
+                # directamente en vez de llamar pa.terminate() con el hilo
+                # todavía vivo (antes esto podía tocar una instancia de
+                # PyAudio ya terminada y crashear al cerrar NOVA).
+                logger.warning("El hilo de escucha no terminó a tiempo; intentando desbloquear el stream.")
+                try:
+                    if self.stream:
+                        self.stream.stop_stream()
+                except Exception:
+                    pass
+                self._listen_thread.join(timeout=2)
+
+        if self._listen_thread and self._listen_thread.is_alive():
+            logger.warning("El hilo de escucha sigue vivo; se omite pa.terminate() para evitar un crash.")
+        elif self.pa:
             self.pa.terminate()
+
         logger.info("Motor de voz detenido.")
 
 

@@ -3,6 +3,8 @@ import yaml
 import subprocess
 import os
 
+from core.persona import NOVA_IDENTITY
+
 logger = logging.getLogger(__name__)
 
 class CommandDispatcher:
@@ -10,13 +12,17 @@ class CommandDispatcher:
     Recibe el texto del comando de voz y determina qué acción tomar.
     Conecta el motor de voz con la cámara y el sistema operativo.
     """
-    def __init__(self, osc_controller, system_controller=None, ollama_bridge=None, config_path="config.yaml", apps_path="presets/apps.yaml"):
+    def __init__(self, osc_controller, system_controller=None, ollama_bridge=None,
+                 intent_router=None, voice_engine=None, camera_controller=None, config_path="config.yaml", apps_path="presets/apps.yaml"):
         self.osc = osc_controller
         self.system = system_controller
         self.ollama = ollama_bridge
+        self.intent_router = intent_router
+        self.voice = voice_engine
+        self.camera = camera_controller
         self.config = self._load_yaml(config_path)
         self.apps_config = self._load_yaml(apps_path)
-        
+
         # Mapeo simple de comandos de cámara
         # Nota: los submodos de encuadre AI (cuerpo completo, grupo, pizarra, etc.)
         # se quitaron de aquí porque sus códigos numéricos no están confirmados
@@ -26,6 +32,9 @@ class CommandDispatcher:
             "despierta la cámara": self.osc.wake_camera,
             "despierta obsbot": self.osc.wake_camera,
             "despierta la camara": self.osc.wake_camera,
+            "suspéndete": self.osc.sleep_camera,
+            "suspende la cámara": self.osc.sleep_camera,
+            "duérmete": self.osc.sleep_camera,
             "sígueme": self.osc.track_human,
             "trackea mi cara": self.osc.track_human,
             "acércate": lambda: self.osc.set_zoom(60.0),
@@ -35,6 +44,12 @@ class CommandDispatcher:
             "para de seguirme": self.osc.stop_tracking,
             "deja de seguirme": self.osc.stop_tracking,
             "resetea la cámara": self.osc.gimbal_reset,
+            "mira a la izquierda": self.osc.look_left,
+            "mira izquierda": self.osc.look_left,
+            "mira a la derecha": self.osc.look_right,
+            "mira derecha": self.osc.look_right,
+            "mira arriba": self.osc.look_up,
+            "mira abajo": self.osc.look_down,
         }
         
         # Mapeo simple de comandos de sistema
@@ -91,12 +106,19 @@ class CommandDispatcher:
             app_name = text.replace("cierra", "").strip()
             return self.system.close_application(app_name) if self.system else "Sin control de sistema"
 
-        # 4. Consultas a Ollama (IA local)
+        # 4. Consultas directas a Ollama (frase explícita, sin pasar por el clasificador)
         if "pregúntale a ollama" in text or "dile a ollama" in text:
             prompt = text.replace("pregúntale a ollama", "").replace("dile a ollama", "").strip()
             if self.ollama:
-                return self.ollama.query(prompt)
+                prompt = f"{NOVA_IDENTITY}\nResponde de forma breve y directa (máximo 3 frases), en español: {prompt}"
+                tokens = self.ollama.query_stream(prompt)
+                return self._stream_sentences(tokens)
             return "No tengo configurado a Ollama."
+
+        # 5. Cualquier otro comando libre: lo interpreta el clasificador de intención
+        # (buscar archivos, tomar notas, o responder como conversación normal).
+        if self.intent_router:
+            return self.intent_router.route(text)
 
         return "No entendí ese comando."
 
@@ -120,3 +142,32 @@ class CommandDispatcher:
                 return f"No encontré el ejecutable de {key}"
                 
         return f"No tengo registrada la aplicación {app_name}"
+
+    def _stream_sentences(self, token_generator):
+        """
+        Toma un generador de tokens individuales y produce un generador de
+        oraciones completas, delimitadas por signos de puntuación.
+        """
+        buffer = ""
+        delimiters = {".", "!", "?", "\n"}
+        for token in token_generator:
+            buffer += token
+            
+            while True:
+                # Encontrar el delimitador más cercano
+                indices = [buffer.find(d) for d in delimiters if buffer.find(d) != -1]
+                if not indices:
+                    break
+                first_idx = min(indices)
+                
+                # Extraer la oración incluyendo el delimitador
+                sentence = buffer[:first_idx + 1].strip()
+                buffer = buffer[first_idx + 1:]
+                
+                if sentence:
+                    yield sentence
+        
+        # Ceder cualquier remanente al final
+        final_sentence = buffer.strip()
+        if final_sentence:
+            yield final_sentence

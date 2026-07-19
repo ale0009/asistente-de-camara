@@ -1,7 +1,9 @@
 import logging
+import os
 import yaml
 import sys
 import time
+from logging.handlers import RotatingFileHandler
 
 from core.camera import CameraController
 from core.osc_controller import OSCController
@@ -11,12 +13,29 @@ from core.command_dispatcher import CommandDispatcher
 from core.system_controller import SystemController
 from core.ollama_bridge import OllamaBridge
 from core.obsidian_logger import ObsidianLogger
+from core.file_tools import FileTools
+from core.intent_router import IntentRouter
+from core.config_validator import validate_config
 from ui.tray_app import run_ui
 
-# Configuración de logging
+# ─── Configuración de logging ───────────────────────────────────────────────
+# Además de la consola, se escribe a logs/nova.log con rotación. Si NOVA se
+# lanza sin consola visible (ej. desde el arranque automático de Windows,
+# general.start_with_windows), la consola no existe y sin este archivo
+# cualquier error o traceback se perdería sin dejar rastro.
+LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+_log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+_file_handler = RotatingFileHandler(
+    os.path.join(LOG_DIR, "nova.log"), maxBytes=2 * 1024 * 1024, backupCount=5, encoding="utf-8"
+)
+_file_handler.setFormatter(logging.Formatter(_log_format))
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    format=_log_format,
+    handlers=[logging.StreamHandler(), _file_handler],
 )
 logger = logging.getLogger("NOVA")
 
@@ -24,13 +43,28 @@ class NovaAssistant:
     def __init__(self):
         logger.info("Iniciando NOVA...")
         self.load_config()
-        
+
+        config_errors = validate_config(self.config)
+        if config_errors:
+            logger.error("config.yaml tiene errores, NOVA no puede arrancar:")
+            for err in config_errors:
+                logger.error(f"  - {err}")
+            sys.exit(1)
+
         # 1. Hardware y Control
         self.camera = CameraController(
             camera_index=self.config['camera']['camera_index'],
             width=int(self.config['camera']['resolution'].split('x')[0]),
-            height=int(self.config['camera']['resolution'].split('x')[1])
+            height=int(self.config['camera']['resolution'].split('x')[1]),
+            device_name=self.config['camera'].get('device_name'),
         )
+        # Antes, si se desconectaba la cámara físicamente a mitad de sesión,
+        # el video se congelaba para siempre sin ningún aviso. Ahora se avisa
+        # por UI y queda en el log de sesión (estos callbacks corren en el
+        # hilo de captura de la cámara, no en el de Qt — show_toast ya es
+        # seguro para eso, ver ui/panel_widget.py).
+        self.camera.on_camera_disconnected = self.on_camera_disconnected
+        self.camera.on_camera_reconnected = self.on_camera_reconnected
         self.osc = OSCController(
             ip=self.config['camera']['osc_host'],
             port=self.config['camera']['osc_port']
@@ -40,19 +74,42 @@ class NovaAssistant:
         self.system = SystemController()
         self.ollama = OllamaBridge()
         self.logger_db = ObsidianLogger(self.config['obsidian']['vault_path'], self.config['obsidian']['nova_folder'])
-        
+
+        # 2b. Herramientas del asistente (acotadas a carpetas autorizadas) + enrutador de intención
+        assistant_cfg = self.config.get('assistant', {})
+        self.file_tools = FileTools(
+            allowed_folders=assistant_cfg.get('allowed_folders', []),
+            vault_path=self.config['obsidian']['vault_path'],
+            notes_folder=assistant_cfg.get('notes_folder', 'NOVA/Notas'),
+        )
+        self.intent_router = IntentRouter(self.ollama, self.file_tools)
+
         # 3. Despachador de comandos (el "Cerebro" de acciones)
-        self.dispatcher = CommandDispatcher(self.osc, self.system, self.ollama)
-        
+        self.dispatcher = CommandDispatcher(self.osc, self.system, self.ollama, self.intent_router, camera_controller=self.camera)
+
+        # El router necesita al dispatcher para ejecutar comandos parafraseados
+        # de cámara/sistema (run_command) y abrir apps (open_app) reusando sus
+        # diccionarios ya existentes, en vez de duplicarlos.
+        self.intent_router.dispatcher = self.dispatcher
+
         # 4. Motores de Percepción (Voz y Gestos)
         self.voice = VoiceEngine(self.config['voice'])
+        self.dispatcher.voice = self.voice
         self.gestures = GestureEngine(self.config['gestures'])
-        
+        self.gesture_commands = self._load_yaml("presets/gestures.yaml").get('gestures', {})
+
         # Conectar callbacks
         self.voice.on_wake_word_detected = self.on_wake_word
         self.voice.on_command_recognized = self.on_voice_command
+        self.voice.on_voice_engine_failed = self.on_voice_engine_failed
         self.gestures.on_gesture_detected = self.on_gesture
-        
+        self.osc.on_status_updated = self.on_osc_status_updated
+
+    def on_osc_status_updated(self, tracking_state: str, zoom_level: float):
+        """Notifica a la UI los cambios de estado detectados por OSC en tiempo real."""
+        import ui.panel_widget as pw
+        pw.update_status_safe(tracking_state, zoom_level)
+
     def load_config(self):
         try:
             with open("config.yaml", "r", encoding="utf-8") as f:
@@ -62,12 +119,46 @@ class NovaAssistant:
             logger.error(f"Error cargando config.yaml: {e}")
             sys.exit(1)
 
+    def _load_yaml(self, path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+        except Exception as e:
+            logger.error(f"Error cargando {path}: {e}")
+            return {}
+
     def on_wake_word(self):
         """Se ejecuta cuando NOVA escucha su nombre."""
         # Mostrar el UI de escucha activamente
         from ui.panel_widget import show_listening
         show_listening()
         self.logger_db.log_action("Voz", "Wake word detectado")
+
+    def on_voice_engine_failed(self, error_msg: str):
+        """Se ejecuta si el hilo de voz no pudo arrancar (ej. micrófono inválido).
+
+        Antes esto fallaba en silencio: NOVA seguía corriendo pero sin voz,
+        sin ningún indicio visible de por qué. Ahora se avisa por UI y queda
+        en el log de Obsidian igual que cualquier otro evento de sesión.
+        """
+        from ui.panel_widget import show_toast
+        logger.error(f"Motor de voz caído: {error_msg}")
+        show_toast("Voz desactivada", "No se pudo abrir el micrófono configurado", success=False)
+        self.logger_db.log_action("Sistema", f"Motor de voz caído: {error_msg}")
+
+    def on_camera_disconnected(self):
+        """Se ejecuta si la cámara deja de responder (ej. desconexión física)."""
+        from ui.panel_widget import show_toast
+        logger.warning("Cámara desconectada, reintentando...")
+        show_toast("Cámara desconectada", "Reintentando reconectar...", success=False)
+        self.logger_db.log_action("Sistema", "Cámara desconectada, reintentando")
+
+    def on_camera_reconnected(self):
+        """Se ejecuta cuando la cámara vuelve a responder tras una desconexión."""
+        from ui.panel_widget import show_toast
+        logger.info("Cámara reconectada.")
+        show_toast("Cámara reconectada", "El video volvió a la normalidad", success=True)
+        self.logger_db.log_action("Sistema", "Cámara reconectada")
 
     def on_voice_command(self, text: str):
         """Se ejecuta cuando Whisper transcribe el comando."""
@@ -77,57 +168,73 @@ class NovaAssistant:
         # Enviar comando al despachador
         respuesta = self.dispatcher.process_command(text)
         
-        # Mostrar la respuesta breve en la UI
-        show_toast("Comando de Voz", respuesta, success=True)
-        
-        # Registrar en Obsidian
-        if self.config['obsidian']['log_voice_commands']:
-            self.logger_db.log_action("Voz", text, respuesta)
+        if hasattr(respuesta, '__iter__') and not isinstance(respuesta, (str, bytes)):
+            # Es un generador de oraciones en streaming (Ollama)
+            # Lo consumimos en un hilo secundario para no bloquear el bucle de escucha de voz
+            def _consume_stream():
+                texto_completo = []
+                for oracion in respuesta:
+                    if oracion and oracion.strip():
+                        self.voice.speak(oracion)
+                        texto_completo.append(oracion)
+                
+                respuesta_completa = " ".join(texto_completo)
+                show_toast("Comando de Voz", respuesta_completa, success=True)
+                if self.config['obsidian']['log_voice_commands']:
+                    self.logger_db.log_action("Voz", text, respuesta_completa)
             
-        # Responder con voz
-        self.voice.speak(respuesta)
+            threading.Thread(target=_consume_stream, daemon=True, name="NOVA-StreamConsumer").start()
+        else:
+            # Respuesta estática clásica
+            show_toast("Comando de Voz", respuesta, success=True)
+            if self.config['obsidian']['log_voice_commands']:
+                self.logger_db.log_action("Voz", text, respuesta)
+            self.voice.speak(respuesta)
 
     def on_gesture(self, gesture: str):
-        """Se ejecuta cuando MediaPipe detecta un gesto sostenido."""
-        logger.info(f"Procesando acción para gesto: {gesture}")
-        action_taken = ""
-        
-        if gesture == "palma_abierta":
-            self.osc.track_human()
-            action_taken = "Activado tracking humano"
-        elif gesture == "puno":
-            self.osc.stop_tracking()
-            action_taken = "Tracking detenido"
-        elif gesture == "pellizco":
-            # Zoom In temporal (ejemplo)
-            self.osc.set_zoom(60.0)
-            action_taken = "Zoom in"
-        elif gesture == "victoria":
-            # Comando especial
-            self.system.take_screenshot()
-            action_taken = "Captura de pantalla"
-            
-        if self.config['obsidian']['log_gestures'] and action_taken:
+        """Se ejecuta cuando MediaPipe detecta un gesto sostenido.
+
+        El gesto se traduce a un comando de texto vía presets/gestures.yaml
+        y se procesa exactamente igual que un comando de voz — así el mapeo
+        gesto→acción se edita en el YAML, sin tocar código.
+        """
+        command_text = self.gesture_commands.get(gesture)
+        if not command_text:
+            logger.warning(f"Gesto '{gesture}' sin comando asignado en presets/gestures.yaml")
+            return
+
+        logger.info(f"Procesando acción para gesto: {gesture} -> '{command_text}'")
+        action_taken = self.dispatcher.process_command(command_text)
+
+        if self.config['obsidian']['log_gestures']:
             self.logger_db.log_action("Gesto", gesture, action_taken)
 
     def _vision_loop(self):
-        """Bucle en segundo plano para procesar la visión (MediaPipe) del frame de la cámara."""
+        """Bucle en segundo plano para procesar la visión (MediaPipe) del frame de la cámara.
+
+        Todo el cuerpo va envuelto en try/except: un error en un solo frame
+        (cámara, MediaPipe o UI) no puede tumbar el hilo para el resto de la
+        sesión — antes un error no capturado aquí dejaba los gestos y el video
+        congelados en silencio hasta reiniciar NOVA.
+        """
         while self.is_running:
-            frame = self.camera.get_frame()
-            if frame is not None:
-                # Procesar frame para gestos (devuelve el frame pintado opcionalmente)
-                processed_frame = self.gestures.process_frame(frame)
-                
-                # Enviar frame a la UI si el panel está abierto
-                import ui.panel_widget as pw
-                try:
-                    if pw._panel_instance and not pw._panel_instance.isHidden():
-                        pw._panel_instance.update_video_frame(processed_frame)
-                except RuntimeError:
-                    # El panel se cerró (objeto Qt destruido) justo entre la lectura
-                    # de la referencia y su uso; se ignora este frame y se sigue.
-                    pass
-                    
+            try:
+                frame = self.camera.get_frame()
+                if frame is not None:
+                    # Procesar frame para gestos (devuelve el frame pintado opcionalmente)
+                    processed_frame = self.gestures.process_frame(frame)
+
+                    # Enviar frame a la UI si el panel está abierto. Se usa
+                    # update_video_frame_safe (no acceso directo a
+                    # _panel_instance) porque este hilo NO es el hilo de Qt —
+                    # llamar métodos de un QWidget fuera del hilo de Qt es
+                    # comportamiento indefinido, no solo un riesgo de
+                    # RuntimeError por objeto destruido.
+                    import ui.panel_widget as pw
+                    pw.update_video_frame_safe(processed_frame)
+            except Exception:
+                logger.exception("Error inesperado procesando un frame; se continúa con el siguiente.")
+
             time.sleep(0.03) # ~30 fps
 
     def start(self):
@@ -159,18 +266,39 @@ class NovaAssistant:
         # Log de inicio
         self.logger_db.log_action("Sistema", "NOVA iniciada exitosamente")
         
-        # Iniciar UI
+        # Iniciar UI. on_exit se llama desde el menú "Salir" de la bandeja,
+        # ANTES de que Qt cierre la aplicación — es la única vía real de
+        # cierre hoy (setQuitOnLastWindowClosed(False) impide que cerrar el
+        # panel por sí solo termine el proceso), pero self.stop() es
+        # idempotente por si en el futuro hay más de un camino de salida.
         logger.info("Iniciando Interfaz de Usuario...")
-        run_ui(self.dispatcher)
-        
-        # Al cerrar la UI
+        run_ui(self.dispatcher, on_exit=self.stop)
+
+        # Red de seguridad: si run_ui() retornara por una vía que no pasó
+        # por on_exit, igual se libera todo (stop() no hace nada la segunda vez).
         self.stop()
 
     def stop(self):
+        if getattr(self, "_stopped", False):
+            return
+        self._stopped = True
+
         logger.info("Deteniendo servicios de NOVA...")
         self.is_running = False
         self.voice.stop()
+
+        # Pedirle a la cámara que se suspenda de verdad al cerrar NOVA.
+        # Antes esto faltaba por completo: start() la despertaba (wake_camera)
+        # pero nada la volvía a dormir al salir, así que quedaba con el
+        # gimbal/chip de IA activo indefinidamente aunque NOVA ya no la usara
+        # — esto es fire-and-forget por UDP, no falla si OBSBOT no está
+        # escuchando (ver HANDOVER.md §5, el switch OSC de OBSBOT Center).
+        self.osc.sleep_camera()
         self.camera.stop()
+
+        if hasattr(self, "vision_thread") and self.vision_thread.is_alive():
+            self.vision_thread.join(timeout=2.0)
+
         self.logger_db.log_action("Sistema", "NOVA apagada")
         logger.info("NOVA se ha apagado correctamente.")
 

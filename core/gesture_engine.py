@@ -126,17 +126,25 @@ class GestureEngine:
         if sum(fingers_up) == 4:
             return "palma_abierta"
 
-        # 2. Puño (Todos abajo)
+        # 2. Pulgar Arriba (Like)
+        if sum(fingers_up) == 0 and landmarks[THUMB_TIP].y < landmarks[THUMB_IP].y and pinch_dist > 0.08:
+            return "pulgar_arriba"
+
+        # 3. Puño (Todos abajo)
         if sum(fingers_up) == 0 and pinch_dist > 0.1:
             return "puno"
 
-        # 3. Pellizco
+        # 4. Pellizco
         if sum(fingers_up) == 0 and pinch_dist < 0.05:
             return "pellizco"
 
-        # 4. Paz (V) - Índice y Medio arriba
+        # 5. Paz (V) - Índice y Medio arriba
         if fingers_up == [1, 1, 0, 0]:
             return "victoria"
+
+        # 6. Apuntar (Solo índice arriba)
+        if fingers_up == [1, 0, 0, 0]:
+            return "apuntar"
 
         return None
 

@@ -36,20 +36,35 @@ class OllamaBridge:
         except requests.exceptions.RequestException:
             return []
 
-    def query(self, prompt: str, model: str = None) -> str:
+    def query(self, prompt: str, model: str = None, json_mode: bool = False, max_tokens: int = 220) -> str:
         """
         Envía un prompt a Ollama y retorna la respuesta.
         Esta llamada es sincrónica y puede bloquear, se recomienda ejecutar en un hilo.
+        json_mode=True le pide a Ollama que restrinja la salida a JSON válido
+        (usado por IntentRouter para clasificar comandos libres).
+        max_tokens limita el largo de la respuesta — NOVA es un asistente de voz,
+        las respuestas deben tardar segundos, no minutos, incluso con preguntas abiertas.
         """
         if not model:
             model = self.default_model
-            
+
         url = f"{self.host}/api/generate"
         payload = {
             "model": model,
             "prompt": prompt,
-            "stream": False
+            "stream": False,
+            # Mantiene el modelo cargado en memoria/VRAM entre llamadas.
+            # Sin esto, Ollama lo descarga apenas termina cada respuesta y cada
+            # consulta paga ~7-8s de recarga antes de generar un solo token.
+            "keep_alive": "10m",
+            # qwen3 genera tokens de "razonamiento" internos antes de responder;
+            # eso puede sumar varios segundos que el usuario nunca ve. Se apaga
+            # por defecto para priorizar velocidad sobre razonamiento profundo.
+            "think": False,
+            "options": {"num_predict": max_tokens},
         }
+        if json_mode:
+            payload["format"] = "json"
         
         try:
             logger.info(f"Consultando a Ollama ({model}): {prompt[:50]}...")
@@ -74,6 +89,44 @@ class OllamaBridge:
         except requests.exceptions.RequestException as e:
             logger.error(f"Error de red consultando a Ollama: {e}")
             return "No me pude conectar con el servidor local de Ollama."
+
+    def query_stream(self, prompt: str, model: str = None, max_tokens: int = 220):
+        """
+        Envía un prompt a Ollama con stream=True y va cediendo los fragmentos
+        de texto (tokens) a medida que llegan.
+        Esta llamada es asíncrona mediante generadores (yield) y debe consumirse
+        en un hilo adecuado para no bloquear la UI.
+        """
+        if not model:
+            model = self.default_model
+
+        url = f"{self.host}/api/generate"
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": True,
+            "keep_alive": "10m",
+            "think": False,
+            "options": {"num_predict": max_tokens},
+        }
+
+        try:
+            logger.info(f"Consultando a Ollama en modo stream ({model})...")
+            response = requests.post(url, json=payload, stream=True, timeout=60)
+            
+            if response.status_code == 200:
+                for line in response.iter_lines():
+                    if line:
+                        data = json.loads(line.decode('utf-8'))
+                        token = data.get("response", "")
+                        if token:
+                            yield token
+            else:
+                logger.error(f"Error de Ollama en streaming HTTP {response.status_code}")
+                yield "Hubo un error de comunicación con la IA local."
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error de red consultando a Ollama en stream: {e}")
+            yield "No me pude conectar con el servidor local de Ollama."
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)

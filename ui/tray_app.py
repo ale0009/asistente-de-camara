@@ -11,9 +11,10 @@ logger = logging.getLogger(__name__)
 
 class NovaTrayApp:
     """Aplicación que vive en la bandeja del sistema y lanza el panel flotante de NOVA."""
-    def __init__(self, app: QApplication, dispatcher=None):
+    def __init__(self, app: QApplication, dispatcher=None, on_exit=None):
         self.app = app
         self.dispatcher = dispatcher
+        self.on_exit = on_exit
         self.tray_icon = QSystemTrayIcon(self.app)
         
         # Icono de la bandeja (se reemplazará cuando haya un asset definitivo)
@@ -67,15 +68,28 @@ class NovaTrayApp:
 
     def exit_app(self):
         logger.info("Saliendo de NOVA...")
+        # Antes esto llamaba QCoreApplication.quit() directo, sin garantizar
+        # que NovaAssistant.stop() corriera (cámara/voz/hilos quedaban sin
+        # liberar de forma ordenada — en particular, la cámara nunca recibía
+        # el comando de suspensión). Ahora se ejecuta explícitamente antes de
+        # cerrar Qt.
+        if self.on_exit:
+            try:
+                self.on_exit()
+            except Exception:
+                logger.exception("Error ejecutando on_exit antes de salir")
         QCoreApplication.quit()
 
-def run_ui(dispatcher=None):
+def run_ui(dispatcher=None, on_exit=None):
     """Arranca la QApplication y la bandeja. Se pasa opcionalmente el dispatcher.
     El dispatcher proviene de main.py y contiene toda la lógica de comandos.
+    on_exit (opcional) se llama justo antes de cerrar Qt cuando el usuario
+    sale por el menú de bandeja — main.py lo usa para garantizar un apagado
+    ordenado (NovaAssistant.stop()).
     """
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
-    nova_tray = NovaTrayApp(app, dispatcher)
+    nova_tray = NovaTrayApp(app, dispatcher, on_exit=on_exit)
     nova_tray.start()
     return app.exec()
 

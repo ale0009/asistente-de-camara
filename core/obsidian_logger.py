@@ -1,6 +1,7 @@
 import os
 import datetime
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +15,11 @@ class ObsidianLogger:
         self.base_folder = base_folder
         self.nova_path = os.path.join(self.vault_path, self.base_folder)
         self.sessions_path = os.path.join(self.nova_path, "Sesiones")
-        
+        # Protege el check-then-act de "si no existe, escribir encabezado"
+        # en log_action: llamadas casi simultáneas (voz + gesto) podían
+        # duplicar el encabezado sin este lock.
+        self._lock = threading.Lock()
+
         self._ensure_folders_exist()
 
     def _ensure_folders_exist(self):
@@ -37,14 +42,21 @@ class ObsidianLogger:
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
         
         file_path = os.path.join(self.sessions_path, f"{today}.md")
-        
-        # Crear archivo con encabezado si no existe
-        if not os.path.exists(file_path):
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(f"# Registro de NOVA - {today}\n\n")
-                f.write("> Log generado automáticamente por NOVA AI.\n\n")
-                f.write("## Timeline\n\n")
-        
+
+        # Crear archivo con encabezado si no existe (check-then-act protegido
+        # por lock: sin esto, dos llamadas casi simultáneas podían duplicar
+        # el encabezado).
+        with self._lock:
+            if not os.path.exists(file_path):
+                try:
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(f"# Registro de NOVA - {today}\n\n")
+                        f.write("> Log generado automáticamente por NOVA AI.\n\n")
+                        f.write("## Timeline\n\n")
+                except Exception as e:
+                    logger.error(f"Error creando el archivo de log de Obsidian: {e}")
+                    return
+
         # Formatear la entrada
         log_entry = f"- **[{timestamp}]** `[{source}]` "
         if source == "Voz":

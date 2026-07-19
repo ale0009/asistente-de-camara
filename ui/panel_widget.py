@@ -21,7 +21,8 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import (
     QApplication, QGraphicsDropShadowEffect, QGridLayout,
     QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
-    QPushButton, QSizePolicy, QVBoxLayout, QWidget
+    QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QDialog, QComboBox
 )
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,223 @@ class AudioWave(QWidget):
             painter.drawRoundedRect(i * w + 1, y, w - 2, bar_h, 2, 2)
 
 
+class ConfigDialog(QDialog):
+    """
+    Diálogo modal de configuración con diseño glassmorphism HUD y glow cian.
+    Permite seleccionar el micrófono activo y guardarlo en caliente.
+    """
+    def __init__(self, dispatcher, parent=None):
+        super().__init__(parent)
+        self.dispatcher = dispatcher
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(320, 280)
+        
+        self._drag_pos = None
+        self._build_ui()
+
+    def _build_ui(self):
+        # Contenedor con borde y fondo glassmorphism
+        container = QWidget(self)
+        container.setFixedSize(320, 280)
+        container.setObjectName("container")
+        container.setStyleSheet(f"""
+            QWidget#container {{
+                background: rgba(4, 10, 24, 0.95);
+                border: 1px solid rgba(0, 229, 255, 0.35);
+                border-radius: 12px;
+            }}
+        """)
+        
+        # Sombra con resplandor cian sutil
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(20)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(0, 229, 255, 60))
+        container.setGraphicsEffect(shadow)
+
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+
+        # Título
+        title = QLabel("CONFIGURACIÓN DE NOVA")
+        title.setStyleSheet("font: 700 11px 'Inter'; color: #ffffff; letter-spacing: 1px; background: transparent; border: none;")
+        layout.addWidget(title)
+
+        # Separador fino
+        separator = QWidget()
+        separator.setFixedHeight(1)
+        separator.setStyleSheet("background: rgba(0, 229, 255, 0.15);")
+        layout.addWidget(separator)
+
+        # Label Micrófono
+        label_mic = QLabel("Micrófono de entrada:")
+        label_mic.setStyleSheet(f"font: 600 9px 'Inter'; color: {TEXT_DIM}; background: transparent; border: none;")
+        layout.addWidget(label_mic)
+
+        # ComboBox para micrófonos
+        self.combo_mic = QComboBox()
+        self.combo_mic.setFixedHeight(28)
+        self.combo_mic.setStyleSheet(f"""
+            QComboBox {{
+                background: rgba(0, 0, 0, 0.5);
+                border: 1px solid rgba(0, 229, 255, 0.2);
+                border-radius: 6px;
+                color: #ffffff;
+                padding-left: 8px;
+                font: 500 10px 'Inter';
+            }}
+            QComboBox:hover {{
+                border: 1px solid rgba(0, 229, 255, 0.45);
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 20px;
+                border-left-width: 0px;
+                border-style: solid;
+            }}
+            QComboBox QAbstractItemView {{
+                background: #040a18;
+                border: 1px solid rgba(0, 229, 255, 0.35);
+                border-radius: 6px;
+                color: #ffffff;
+                selection-background-color: rgba(0, 229, 255, 0.25);
+                selection-color: #ffffff;
+                outline: 0px;
+            }}
+        """)
+        layout.addWidget(self.combo_mic)
+
+        # Cargar micrófonos
+        self.devices = {}
+        if self.dispatcher and hasattr(self.dispatcher, 'voice') and self.dispatcher.voice:
+            try:
+                self.devices = self.dispatcher.voice.get_input_devices()
+                current_mic = self.dispatcher.voice.config.get("mic_index", None)
+                
+                for idx, name in self.devices.items():
+                    self.combo_mic.addItem(f"{idx}: {name[:32]}", idx)
+                    if current_mic == idx:
+                        self.combo_mic.setCurrentIndex(self.combo_mic.count() - 1)
+            except Exception as e:
+                logger.error(f"Error cargando micrófonos en ConfigDialog: {e}")
+        
+        if self.combo_mic.count() == 0:
+            self.combo_mic.addItem("No se encontraron micrófonos", None)
+            self.combo_mic.setEnabled(False)
+
+        # Label Cámara
+        label_cam = QLabel("Cámara de video:")
+        label_cam.setStyleSheet(f"font: 600 9px 'Inter'; color: {TEXT_DIM}; background: transparent; border: none;")
+        layout.addWidget(label_cam)
+
+        # ComboBox para cámaras
+        self.combo_cam = QComboBox()
+        self.combo_cam.setFixedHeight(28)
+        self.combo_cam.setStyleSheet(self.combo_mic.styleSheet())
+        layout.addWidget(self.combo_cam)
+
+        # Cargar cámaras
+        self.cameras = {}
+        if self.dispatcher and hasattr(self.dispatcher, 'camera') and self.dispatcher.camera:
+            try:
+                self.cameras = self.dispatcher.camera.get_available_cameras()
+                current_cam_idx = getattr(self.dispatcher.camera, 'camera_index', 0)
+                
+                for idx, name in self.cameras.items():
+                    self.combo_cam.addItem(f"{idx}: {name[:32]}", (idx, name))
+                    if current_cam_idx == idx:
+                        self.combo_cam.setCurrentIndex(self.combo_cam.count() - 1)
+            except Exception as e:
+                logger.error(f"Error cargando cámaras en ConfigDialog: {e}")
+
+        if self.combo_cam.count() == 0:
+            self.combo_cam.addItem("No se encontraron cámaras", None)
+            self.combo_cam.setEnabled(False)
+
+        layout.addStretch()
+
+        # Botones inferiores (Guardar / Cancelar)
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
+
+        btn_cancel = QPushButton("Cancelar")
+        btn_cancel.setFixedHeight(28)
+        btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255, 255, 255, 0.03);
+                border: 1px solid rgba(255, 255, 255, 0.07);
+                border-radius: 6px;
+                color: {TEXT_DIM};
+                font: 600 10px 'Inter';
+            }}
+            QPushButton:hover {{
+                background: rgba(255, 255, 255, 0.08);
+                color: #ffffff;
+            }}
+        """)
+        btn_cancel.clicked.connect(self.reject)
+        btn_layout.addWidget(btn_cancel)
+
+        btn_save = QPushButton("Guardar")
+        btn_save.setFixedHeight(28)
+        btn_save.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(0, 229, 255, 0.15);
+                border: 1px solid rgba(0, 229, 255, 0.28);
+                border-radius: 6px;
+                color: {ACC};
+                font: 600 10px 'Inter';
+            }}
+            QPushButton:hover {{
+                background: rgba(0, 229, 255, 0.25);
+                border: 1px solid rgba(0, 229, 255, 0.55);
+            }}
+        """)
+        btn_save.clicked.connect(self._on_save)
+        btn_layout.addWidget(btn_save)
+
+        layout.addLayout(btn_layout)
+
+    # Permitir arrastrar la ventana
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos is not None:
+            delta = event.globalPosition().toPoint() - self._drag_pos
+            self.move(self.x() + delta.x(), self.y() + delta.y())
+            self._drag_pos = event.globalPosition().toPoint()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+
+    def _on_save(self):
+        # Guardar Micrófono
+        selected_mic_idx = self.combo_mic.currentData()
+        if selected_mic_idx is not None and self.dispatcher and hasattr(self.dispatcher, 'voice') and self.dispatcher.voice:
+            try:
+                self.dispatcher.voice.set_microphone(selected_mic_idx)
+            except Exception as e:
+                logger.error(f"Error al cambiar micrófono en ConfigDialog: {e}")
+
+        # Guardar Cámara
+        selected_cam_data = self.combo_cam.currentData()
+        if selected_cam_data is not None and self.dispatcher and hasattr(self.dispatcher, 'camera') and self.dispatcher.camera:
+            try:
+                cam_idx, cam_name = selected_cam_data
+                self.dispatcher.camera.set_camera(cam_idx, cam_name)
+            except Exception as e:
+                logger.error(f"Error al cambiar cámara en ConfigDialog: {e}")
+
+        from ui.panel_widget import show_toast
+        show_toast("Configuración", "Preferencias de hardware actualizadas.", success=True)
+        self.accept()
+
+
 # ─── Panel Flotante Principal ─────────────────────────────────────────────────
 class FloatingPanel(QWidget):
     """
@@ -121,6 +339,9 @@ class FloatingPanel(QWidget):
         super().__init__(parent)
         self.dispatcher = dispatcher
         self._drag_pos = None
+        # Evita que clics repetidos rápidos apilen hilos/llamadas concurrentes
+        # a process_command — antes cada clic lanzaba un hilo nuevo sin límite.
+        self._dispatch_busy = threading.Lock()
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -426,8 +647,16 @@ class FloatingPanel(QWidget):
         btn.clicked.connect(lambda _, c=cmd, l=label: self._on_button(c, l))
         return btn
 
+    def _open_config_dialog(self):
+        dialog = ConfigDialog(self.dispatcher, self)
+        dialog.exec()
+
     # ── Lógica ────────────────────────────────────────────────────────────
     def _on_button(self, cmd: str, label: str):
+        if cmd == "config":
+            self._open_config_dialog()
+            return
+
         mapping = {
             "wake":     "despierta la cámara",
             "track":    "sígueme",
@@ -441,12 +670,18 @@ class FloatingPanel(QWidget):
             "help":     "pregúntale a ollama ¿cómo usar NOVA?",
         }
         voice_cmd = mapping.get(cmd, cmd)
-        if self.dispatcher:
-            threading.Thread(
-                target=self._dispatch, args=(voice_cmd, label), daemon=True
-            ).start()
-        else:
+        if not self.dispatcher:
             self.add_log("UI", f"[sin dispatcher] {label}")
+            return
+
+        if not self._dispatch_busy.acquire(blocking=False):
+            logger.info(f"Clic ignorado (comando anterior aún en curso): {label}")
+            self.add_log("UI", f"Espera, procesando el comando anterior…")
+            return
+
+        threading.Thread(
+            target=self._dispatch, args=(voice_cmd, label), daemon=True
+        ).start()
 
     def _dispatch(self, cmd: str, label: str):
         try:
@@ -454,6 +689,8 @@ class FloatingPanel(QWidget):
             self.add_log("CMD", f"{label} → {resp[:40]}")
         except Exception as e:
             self.add_log("ERR", str(e)[:40])
+        finally:
+            self._dispatch_busy.release()
 
     def add_log(self, source: str, text: str):
         """Añade una fila al log. Hilo-seguro via QTimer."""
@@ -527,8 +764,9 @@ class FloatingPanel(QWidget):
     def closeEvent(self, event):
         super().closeEvent(event)
         global _panel_instance
-        if _panel_instance is self:
-            _panel_instance = None
+        with _panel_lock:
+            if _panel_instance is self:
+                _panel_instance = None
 
 
 # ─── Overlay de Escucha (Pill Widget) ─────────────────────────────────────────
@@ -693,16 +931,62 @@ class ToastNotification(QWidget):
 _panel_instance: FloatingPanel | None = None
 _toast_instance: ToastNotification | None = None
 _listening_instance: ListeningOverlay | None = None
+# Protege _panel_instance: se escribe desde el hilo de Qt (launch_panel/
+# closeEvent) y se lee desde el hilo de visión de main.py (vía
+# update_video_frame_safe más abajo).
+_panel_lock = threading.Lock()
 
 def launch_panel(dispatcher=None) -> FloatingPanel:
     global _panel_instance
-    if _panel_instance and not _panel_instance.isHidden():
-        _panel_instance.raise_()
-        _panel_instance.activateWindow()
+    with _panel_lock:
+        if _panel_instance and not _panel_instance.isHidden():
+            _panel_instance.raise_()
+            _panel_instance.activateWindow()
+            return _panel_instance
+        _panel_instance = FloatingPanel(dispatcher)
+        _panel_instance.show()
         return _panel_instance
-    _panel_instance = FloatingPanel(dispatcher)
-    _panel_instance.show()
-    return _panel_instance
+
+def update_video_frame_safe(frame_bgr):
+    """Punto de entrada seguro para hilos que no son el de Qt (ej. el hilo de
+    visión en main.py) para actualizar el video del panel.
+
+    Antes, ese hilo llamaba directamente a `_panel_instance.isHidden()` y
+    `.update_video_frame()` fuera del hilo de Qt — una violación de las
+    reglas de thread-affinity de Qt (comportamiento indefinido, no solo el
+    `RuntimeError` de objeto-ya-destruido que sí se capturaba). Aquí solo se
+    lee la referencia bajo lock; la llamada real a métodos de Qt se agenda
+    en el hilo de Qt vía QTimer.singleShot, igual que show_toast/show_listening.
+    """
+    with _panel_lock:
+        panel = _panel_instance
+    if panel is None:
+        return
+
+    def _do():
+        try:
+            if not panel.isHidden():
+                panel.update_video_frame(frame_bgr)
+        except RuntimeError:
+            # El panel se cerró (objeto Qt destruido) justo entre la lectura
+            # de la referencia y su uso ya dentro del hilo de Qt.
+            pass
+    QTimer.singleShot(0, QApplication.instance(), _do)
+
+def update_status_safe(tracking: str, zoom: float):
+    """Punto de entrada seguro para hilos para actualizar la barra de estado/chips HUD."""
+    with _panel_lock:
+        panel = _panel_instance
+    if panel is None:
+        return
+
+    def _do():
+        try:
+            if not panel.isHidden():
+                panel.update_status(tracking, zoom)
+        except RuntimeError:
+            pass
+    QTimer.singleShot(0, QApplication.instance(), _do)
 
 def show_toast(title: str, body: str, success: bool = True):
     def _do():

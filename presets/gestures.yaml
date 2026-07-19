@@ -1,0 +1,11 @@
+# Mapa gesto -> comando. El texto de la derecha se procesa exactamente igual
+# que si lo hubieras dicho por voz (pasa por CommandDispatcher.process_command),
+# así que puedes usar cualquier frase que ya funcione por voz, incluyendo
+# comandos libres que interpretará el clasificador de intención.
+gestures:
+  palma_abierta: "sígueme"
+  puno: "para de seguirme"
+  pellizco: "acércate"
+  victoria: "captura de pantalla"
+  apuntar: "toma una foto"
+  pulgar_arriba: "resetea la cámara"
