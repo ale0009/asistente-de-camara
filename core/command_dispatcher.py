@@ -84,6 +84,9 @@ class CommandDispatcher:
             "muéstrame el escritorio": lambda: self.system.show_desktop() if self.system else "Sin control de sistema",
             "minimiza todo": lambda: self.system.show_desktop() if self.system else "Sin control de sistema",
             "siguiente ventana": lambda: self.system.next_window() if self.system else "Sin control de sistema",
+            "abre blender": lambda: self._open_app("blender"),
+            "modo blender": lambda: self._open_app("blender"),
+            "abre reporte de addons": lambda: self.process_command("qué dice mi reporte de addons"),
         }
 
     def _activate_presentation_mode(self) -> str:

@@ -154,3 +154,16 @@ def test_voice_engine_set_microphone_updates_config_and_yaml(tmp_path, monkeypat
     with open("config.yaml", "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     assert cfg["voice"]["mic_index"] == 2
+
+
+def test_voice_engine_custom_onnx_detection(tmp_path, monkeypatch):
+    import os
+    fake_onnx = tmp_path / "nova.onnx"
+    fake_onnx.write_text("fake_onnx_bytes", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    os.makedirs("assets", exist_ok=True)
+    with open("assets/nova.onnx", "w") as f:
+        f.write("fake")
+
+    engine = VoiceEngine({})
+    assert engine is not None

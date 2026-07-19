@@ -98,12 +98,13 @@ class VoiceEngine:
         self.stt_model = whisper.load_model(self.stt_model_size)
         logger.info("Whisper listo.")
 
-        # 2. openWakeWord — intentamos con el modelo de "hey jarvis" incluido
-        #    (el más parecido a "nova"). Si el usuario quiere entrenar "hey nova"
-        #    puede subir el .onnx a assets/nova.onnx y reemplazar la lista.
+        # 2. openWakeWord — verificar si existe assets/nova.onnx custom o usar el fallback
+        custom_onnx = os.path.abspath("assets/nova.onnx")
         oww_models = self.config.get("wake_word_models", [])
-        if not oww_models:
-            # Modelos preentrenados incluidos en el paquete de openWakeWord
+        if os.path.isfile(custom_onnx):
+            logger.info("Detectado modelo custom ONNX para 'Hey Nova' en: %s", custom_onnx)
+            oww_models = [custom_onnx]
+        elif not oww_models:
             oww_models = ["hey_jarvis"]   # Fallback gratuito incluido por defecto
 
         logger.info("Cargando openWakeWord con modelos: %s", oww_models)
