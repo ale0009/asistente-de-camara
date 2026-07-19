@@ -93,7 +93,7 @@ class GestureEngine:
         return cv2.flip(image_bgr, 1)
 
     def _draw_landmarks(self, image, landmarks):
-        """Dibuja el esqueleto de la mano (opcional, útil para debug)."""
+        """Dibuja el esqueleto de la mano y marca sutilmente el centro de encuadre."""
         h, w = image.shape[:2]
         points = [(int(lm.x * w), int(lm.y * h)) for lm in landmarks]
 
@@ -101,6 +101,10 @@ class GestureEngine:
             cv2.line(image, points[start], points[end], (255, 255, 255), 2)
         for point in points:
             cv2.circle(image, point, 4, (0, 255, 0), -1)
+
+        # Guía de encuadre en el tercio superior
+        guide_y = int(h * 0.33)
+        cv2.line(image, (0, guide_y), (w, guide_y), (0, 229, 255), 1)
 
     def _recognize_gesture(self, landmarks):
         """
