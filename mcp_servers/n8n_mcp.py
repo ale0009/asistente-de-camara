@@ -34,6 +34,28 @@ class N8NAutomationMCPServer:
                     },
                     "required": ["webhook_path", "payload"]
                 }
+            },
+            {
+                "name": "n8n_send_notification",
+                "description": "Envía una notificación o resumen rápido al canal de automatizaciones prediseñado en n8n.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "Título o asunto de la notificación."
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "Cuerpo del mensaje o resumen."
+                        },
+                        "priority": {
+                            "type": "string",
+                            "description": "Nivel de prioridad: 'low', 'normal', 'high'."
+                        }
+                    },
+                    "required": ["title", "message"]
+                }
             }
         ]
 
@@ -42,8 +64,20 @@ class N8NAutomationMCPServer:
             webhook_path = arguments.get("webhook_path", "").lstrip("/")
             payload = arguments.get("payload", {})
             return self._trigger_webhook(webhook_path, payload)
+        elif tool_name == "n8n_send_notification":
+            title = arguments.get("title", "")
+            message = arguments.get("message", "")
+            priority = arguments.get("priority", "normal")
+            payload = {
+                "source": "NOVA_AGENT",
+                "title": title,
+                "message": message,
+                "priority": priority
+            }
+            return self._trigger_webhook("webhook/nova-notification", payload)
         else:
             return {"success": False, "error": f"Herramienta n8n desconocida: {tool_name}"}
+
 
     def _trigger_webhook(self, webhook_path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         url = f"{self.n8n_base_url}/{webhook_path}"

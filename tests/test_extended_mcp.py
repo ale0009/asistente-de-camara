@@ -22,6 +22,24 @@ class TestExtendedMCPServers(unittest.TestCase):
         self.assertTrue(res["success"])
         self.assertEqual(res["status_code"], 200)
 
+    @patch("urllib.request.urlopen")
+    def test_n8n_send_notification_success(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b'{"status": "ok"}'
+        mock_resp.status = 200
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        n8n_server = N8NAutomationMCPServer()
+        res = n8n_server.execute_tool("n8n_send_notification", {
+            "title": "Alerta Resumen",
+            "message": "Sesión iniciada correctamente",
+            "priority": "high"
+        })
+        self.assertTrue(res["success"])
+        self.assertEqual(res["status_code"], 200)
+
+
     @patch("subprocess.run")
     def test_git_status_execution(self, mock_run):
         mock_res = MagicMock()
