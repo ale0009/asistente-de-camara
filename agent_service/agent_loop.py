@@ -102,3 +102,122 @@ class AgentLoop:
             "response_text": response_text,
             "execution_time_ms": execution_time_ms
         }
+
+    def process_interaction_stream(self, raw_prompt: str, source_channel: str = "websocket"):
+        """
+        Generador que procesa la interacción y produce fragmentos por oración
+        para reproducción de voz/streaming en tiempo real.
+        """
+        start_time = time.time()
+        tools_schema = self.mcp_manager.get_all_tools_schema()
+
+        routing_decision = self.intent_router.route(raw_prompt, tools_schema)
+        category = routing_decision.get("category", "direct_answer")
+        tool_name = routing_decision.get("tool_name")
+        arguments = routing_decision.get("arguments") or {}
+
+        status = "SUCCESS"
+        response_text = ""
+        tool_result = None
+
+        if category == "mcp_tool_call" and tool_name:
+            try:
+                tool_result = self.mcp_manager.execute_tool(tool_name, arguments)
+                if tool_result.get("success"):
+                    response_text = f"Herramienta '{tool_name}' ejecutada con éxito: {tool_result}"
+                else:
+                    status = "FAILED"
+                    response_text = f"Fallo al ejecutar herramienta '{tool_name}': {tool_result.get('error')}"
+            except OverwriteError as oe:
+                status = "PROTECTED_BLOCKED"
+                response_text = str(oe)
+            except Exception as e:
+                status = "ERROR"
+                response_text = f"Error inesperado ejecutando tool '{tool_name}': {e}"
+
+            yield {
+                "type": "sentence_chunk",
+                "chunk": response_text,
+                "is_final": True
+            }
+
+        elif category == "celery_task":
+            status = "ENQUEUED"
+            response_text = f"Tarea pesada '{raw_prompt}' encolada exitosamente en Celery (VRAMLock activo)."
+            yield {
+                "type": "sentence_chunk",
+                "chunk": response_text,
+                "is_final": True
+            }
+
+        else:  # direct_answer
+            try:
+                tokens = self.ollama.query_stream(
+                    prompt=raw_prompt,
+                    system="Eres NOVA, el asistente de inteligencia artificial local. Responde de forma clara, concisa y directa."
+                )
+                buffer = ""
+                delimiters = {".", "!", "?", "\n"}
+                full_chunks = []
+
+                for token in tokens:
+                    buffer += token
+                    while True:
+                        indices = [buffer.find(d) for d in delimiters if buffer.find(d) != -1]
+                        if not indices:
+                            break
+                        first_idx = min(indices)
+                        sentence = buffer[:first_idx + 1].strip()
+                        buffer = buffer[first_idx + 1:]
+                        if sentence:
+                            full_chunks.append(sentence)
+                            yield {
+                                "type": "sentence_chunk",
+                                "chunk": sentence,
+                                "is_final": False
+                            }
+
+                final_sentence = buffer.strip()
+                if final_sentence:
+                    full_chunks.append(final_sentence)
+                    yield {
+                        "type": "sentence_chunk",
+                        "chunk": final_sentence,
+                        "is_final": False
+                    }
+
+                response_text = " ".join(full_chunks)
+
+            except Exception as e:
+                status = "ERROR"
+                response_text = f"Error al consultar LLM local: {e}"
+                yield {
+                    "type": "sentence_chunk",
+                    "chunk": response_text,
+                    "is_final": True
+                }
+
+        execution_time_ms = (time.time() - start_time) * 1000.0
+
+        self.audit_logger.log_interaction(
+            source_channel=source_channel,
+            raw_prompt=raw_prompt,
+            intent_category=category,
+            tool_name=tool_name,
+            tool_args=arguments,
+            status=status,
+            result_summary=response_text[:500],
+            execution_time_ms=execution_time_ms
+        )
+
+        yield {
+            "type": "completion",
+            "status": status,
+            "category": category,
+            "tool_name": tool_name,
+            "tool_args": arguments,
+            "tool_result": tool_result,
+            "response_text": response_text,
+            "execution_time_ms": execution_time_ms
+        }
+

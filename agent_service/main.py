@@ -61,7 +61,8 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_text()
-            result = agent_loop.process_interaction(data, source_channel="websocket")
-            await websocket.send_json(result)
+            for chunk in agent_loop.process_interaction_stream(data, source_channel="websocket"):
+                await websocket.send_json(chunk)
     except Exception as e:
         logger.info(f"Conexión WebSocket cerrada: {e}")
+

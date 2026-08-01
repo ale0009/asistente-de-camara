@@ -64,5 +64,26 @@ class TestAgentLoop(unittest.TestCase):
         self.assertEqual(res["status"], "PROTECTED_BLOCKED")
         self.assertIn("OverwriteError", res["response_text"])
 
+    def test_process_interaction_stream_direct_answer(self):
+        self.mock_router.route.return_value = {
+            "category": "direct_answer",
+            "tool_name": None,
+            "arguments": None
+        }
+        self.mock_ollama.query_stream.return_value = ["Hola, ", "soy ", "NOVA. ", "¡Bienvenido!"]
+
+        chunks = list(self.agent_loop.process_interaction_stream("Hola", source_channel="test_stream"))
+        
+        # Debe haber eventos de oraciones + evento final de completion
+        self.assertTrue(len(chunks) >= 2)
+        sentence_events = [c for c in chunks if c.get("type") == "sentence_chunk"]
+        completion_events = [c for c in chunks if c.get("type") == "completion"]
+
+        self.assertTrue(len(sentence_events) > 0)
+        self.assertEqual(len(completion_events), 1)
+        self.assertEqual(completion_events[0]["status"], "SUCCESS")
+
+
 if __name__ == "__main__":
     unittest.main()
+
