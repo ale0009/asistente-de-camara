@@ -7,14 +7,19 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.voice_engine import VoiceEngine
 
 
-def test_listen_loop_reports_failure_if_mic_cannot_open():
+def test_listen_loop_reports_failure_if_mic_cannot_open(monkeypatch):
     """Antes, un fallo al abrir el stream (ej. mic_index inválido) escapaba
     sin capturar y mataba el hilo en silencio. Ahora debe quedar contenido y
     avisado vía on_voice_engine_failed."""
+    import time
     engine = VoiceEngine({"mic_index": 999})
+    engine.is_running = True
     engine._open_stream = Mock(side_effect=OSError("Invalid input device (999)"))
     failures = []
     engine.on_voice_engine_failed = lambda msg: failures.append(msg)
+
+    # Detener el bucle en la primera llamada a sleep
+    monkeypatch.setattr(time, "sleep", lambda sec: setattr(engine, "is_running", False))
 
     engine._listen_loop()  # no debe lanzar
 
@@ -22,9 +27,14 @@ def test_listen_loop_reports_failure_if_mic_cannot_open():
     assert "999" in failures[0] or "Invalid input device" in failures[0]
 
 
-def test_listen_loop_does_not_crash_without_failure_callback_set():
+def test_listen_loop_does_not_crash_without_failure_callback_set(monkeypatch):
+    import time
     engine = VoiceEngine({"mic_index": 999})
+    engine.is_running = True
     engine._open_stream = Mock(side_effect=OSError("boom"))
+
+    # Detener el bucle en la primera llamada a sleep
+    monkeypatch.setattr(time, "sleep", lambda sec: setattr(engine, "is_running", False))
 
     engine._listen_loop()  # no debe lanzar aunque no haya callback asignado
 
@@ -144,10 +154,10 @@ def test_voice_engine_set_microphone_updates_config_and_yaml(tmp_path, monkeypat
     assert success is True
     assert engine.config["mic_index"] == 2
     
-    # Verificar que el stream original se cerró y el nuevo se abrió
+    # Verificar que el stream original se cerró y quedó en None para ser reabierto por el bucle
     mock_stream.stop_stream.assert_called_once()
     mock_stream.close.assert_called_once()
-    assert engine.stream == mock_new_stream
+    assert engine.stream is None
     
     # Verificar persistencia en config.yaml
     import yaml

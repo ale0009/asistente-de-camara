@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import logging
 import yaml
 import subprocess
@@ -154,6 +155,54 @@ class CommandDispatcher:
         if text.startswith("nova"):
             text = text.replace("nova", "").strip()
 
+        # ─── Comandos Dinámicos Numéricos (Zoom y Volumen) ─────────────────────
+        if "zoom" in text:
+            import re
+            match = re.search(r'(?:al\s+|en\s+|a\s+)?(\d+)(?:\s*%)?', text)
+            if match:
+                try:
+                    val = float(match.group(1))
+                    if 0 <= val <= 100:
+                        logger.info(f"Ajustando zoom dinámico por voz a: {val}%")
+                        self.osc.set_zoom(val)
+                        return f"Zoom ajustado al {int(val)} por ciento"
+                except Exception as e:
+                    logger.error(f"Error procesando zoom dinámico por voz: {e}")
+
+        if "volumen" in text and not ("sube" in text or "baja" in text):
+            import re
+            match = re.search(r'(?:al\s+|en\s+|a\s+)?(\d+)(?:\s*%)?', text)
+            if match:
+                try:
+                    val = float(match.group(1))
+                    if 0 <= val <= 100:
+                        logger.info(f"Ajustando volumen dinámico por voz a: {val}%")
+                        if self.system:
+                            return self.system.set_volume(val)
+                except Exception as e:
+                    logger.error(f"Error procesando volumen dinámico por voz: {e}")
+
+        # Detección de micrófono independiente de acentos y codificación
+        if ("micr" in text and "fon" in text) and ("cambia" in text or "selecciona" in text or "pon" in text):
+            import re
+            patterns = [
+                r'cambia\s+el\s+micr[oó]fono\s+(?:al\s+|a\s+)\s*(.+)',
+                r'cambia\s+de\s+micr[oó]fono\s+(?:al\s+|a\s+)\s*(.+)',
+                r'cambia\s+micr[oó]fono\s+(?:al\s+|a\s+)\s*(.+)',
+                r'selecciona\s+el\s+micr[oó]fono\s+(?:de\s+|a\s+)?\s*(.+)',
+                r'pon\s+el\s+micr[oó]fono\s+(?:en\s+|a\s+)?\s*(.+)',
+                r'micr[oó]fono\s+(?:al\s+|a\s+|en\s+)\s*(.+)'
+            ]
+            query = None
+            for pattern in patterns:
+                m = re.search(pattern, text)
+                if m:
+                    query = m.group(1).strip()
+                    break
+            if query:
+                logger.info(f"Comando de cambio de micrófono detectado. Query: '{query}'")
+                return self.select_microphone_by_name(query)
+
         # 1. Comandos de Cámara
         for cmd, action in self.camera_commands.items():
             if cmd in text:
@@ -243,3 +292,70 @@ class CommandDispatcher:
         final_sentence = buffer.strip()
         if final_sentence:
             yield final_sentence
+
+    def _normalize_text(self, text: str) -> str:
+        import unicodedata
+        # Quitar acentos
+        text = "".join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
+        text = text.lower().strip()
+        # Quitar caracteres especiales residuales de codificación (reemplazar por espacio)
+        text = "".join(c if (c.isalnum() or c.isspace()) else " " for c in text)
+        
+        # Mapeo de sinónimos comunes de hardware (Español -> Inglés)
+        synonyms = {
+            "camara": "camera",
+            "audifonos": "headphone",
+            "audifono": "headphone",
+            "auriculares": "headphone",
+            "auricular": "headphone",
+            "microfono": "mic",
+            "parlante": "speaker",
+            "parlantes": "speaker",
+            "altavoz": "speaker",
+            "altavoces": "speaker",
+            "inalambrico": "wireless",
+            "inalambricos": "wireless",
+        }
+        for sp, en in synonyms.items():
+            text = text.replace(sp, en)
+        return text
+
+    def select_microphone_by_name(self, name_query: str) -> str:
+        """Busca un micrófono por nombre (coincidencia de palabras clave y sinónimos) y lo activa."""
+        if not self.voice:
+            return "El motor de voz no está disponible"
+            
+        try:
+            devices = self.voice.get_input_devices()
+        except Exception as e:
+            logger.error(f"Error obteniendo dispositivos de entrada: {e}")
+            return "No pude listar los micrófonos disponibles"
+
+        # Normalizar y extraer palabras clave significativas
+        query_norm = self._normalize_text(name_query)
+        stop_words = {"de", "la", "el", "al", "en", "con", "del", "para"}
+        keywords = [w for w in query_norm.split() if w not in stop_words and len(w) > 1]
+        
+        if not keywords:
+            return "No especificaste palabras clave válidas para el micrófono"
+
+        best_index = None
+        best_name = None
+        
+        for idx, dev_name in devices.items():
+            dev_norm = self._normalize_text(dev_name)
+            # Validar que TODAS las palabras clave buscadas estén en el nombre del dispositivo
+            if all(kw in dev_norm for kw in keywords):
+                best_index = idx
+                best_name = dev_name
+                break
+                
+        if best_index is not None:
+            try:
+                self.voice.set_microphone(best_index)
+                return f"Micrófono cambiado a {best_name}"
+            except Exception as e:
+                logger.error(f"Error al cambiar de micrófono a index {best_index}: {e}")
+                return f"No pude cambiar al micrófono {best_name}"
+        else:
+            return f"No encontré ningún micrófono que coincida con {name_query}"

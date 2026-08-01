@@ -3,6 +3,7 @@ import os
 import yaml
 import sys
 import time
+import threading
 from logging.handlers import RotatingFileHandler
 
 from core.camera import CameraController
@@ -250,23 +251,23 @@ class NovaAssistant:
         if general_cfg.get('start_obsbot_center') and general_cfg.get('obsbot_path'):
             self.system.launch_obsbot_center(general_cfg['obsbot_path'])
 
-        # Despertar la cámara por si quedó en standby (las OBSBOT Tiny se
-        # suspenden solas tras inactividad) antes de intentar abrir el video.
-        time.sleep(1.0)
-        self.osc.wake_camera()
-        time.sleep(1.0)
-
-        # Iniciar modelos de voz (asíncrono/hilos)
-        self.voice.initialize_models()
-        self.voice.start_listening()
-
         # Iniciar cámara
         self.camera.start()
         
         # Bucle de visión
-        import threading
         self.vision_thread = threading.Thread(target=self._vision_loop, daemon=True)
         self.vision_thread.start()
+
+        # Iniciar modelos de voz y OSC wake en segundo plano sin bloquear el arranque de la UI
+        def _async_init_services():
+            try:
+                time.sleep(0.5)
+                self.osc.wake_camera()
+                self.voice.initialize_models()
+                self.voice.start_listening()
+            except Exception as e:
+                logger.error(f"Error inicializando voz en segundo plano: {e}")
+        threading.Thread(target=_async_init_services, daemon=True, name="NOVA-VoiceInit").start()
         
         # Log de inicio
         self.logger_db.log_action("Sistema", "NOVA iniciada exitosamente")

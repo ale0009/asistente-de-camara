@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import sys
 from unittest.mock import Mock, patch
@@ -9,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.command_dispatcher import CommandDispatcher
 
 
-def make_dispatcher(tmp_path, osc=None, system=None, ollama=None, apps=None):
+def make_dispatcher(tmp_path, osc=None, system=None, ollama=None, apps=None, voice=None):
     apps_path = tmp_path / "apps.yaml"
     apps_path.write_text(
         yaml.safe_dump({"apps": apps or {}}), encoding="utf-8"
@@ -22,6 +23,7 @@ def make_dispatcher(tmp_path, osc=None, system=None, ollama=None, apps=None):
         system_controller=system or Mock(),
         ollama_bridge=ollama,
         intent_router=None,
+        voice_engine=voice,
         config_path=str(config_path),
         apps_path=str(apps_path),
     )
@@ -146,3 +148,56 @@ def test_obs_commands(tmp_path):
     dispatcher = make_dispatcher(tmp_path)
     reply = dispatcher.process_command("inicia grabación")
     assert "OBS Studio" in reply
+
+
+def test_dynamic_zoom_commands(tmp_path):
+    osc = Mock()
+    dispatcher = make_dispatcher(tmp_path, osc=osc)
+    
+    reply1 = dispatcher.process_command("pon el zoom al 45%")
+    osc.set_zoom.assert_called_once_with(45.0)
+    assert "45 por ciento" in reply1
+
+    osc.reset_mock()
+    reply2 = dispatcher.process_command("haz zoom a 90")
+    osc.set_zoom.assert_called_once_with(90.0)
+    assert "90 por ciento" in reply2
+
+
+def test_dynamic_volume_commands(tmp_path):
+    system = Mock()
+    system.set_volume.return_value = "Volumen ajustado al 75 por ciento"
+    dispatcher = make_dispatcher(tmp_path, system=system)
+    
+    reply1 = dispatcher.process_command("volumen al 75%")
+    system.set_volume.assert_called_once_with(75.0)
+    assert "75 por ciento" in reply1
+
+
+def test_select_microphone_by_voice(tmp_path):
+    voice = Mock()
+    voice.get_input_devices.return_value = {
+        0: "Micrófono del Sistema (Realtek)",
+        1: "OBSBOT Tiny Camera Mic",
+        2: "Audífonos Inalámbricos"
+    }
+    dispatcher = make_dispatcher(tmp_path, voice=voice)
+    
+    # Prueba 1: Coincidencia con OBSBOT
+    reply1 = dispatcher.process_command("cambia el micrófono al de la cámara")
+    voice.set_microphone.assert_called_once_with(1)
+    assert "Micrófono cambiado a OBSBOT Tiny Camera Mic" in reply1
+
+    # Prueba 2: Coincidencia con Audífonos
+    voice.reset_mock()
+    reply2 = dispatcher.process_command("selecciona el micrófono audífonos")
+    voice.set_microphone.assert_called_once_with(2)
+    assert "Micrófono cambiado a Audífonos Inalámbricos" in reply2
+
+    # Prueba 3: Sin coincidencia
+    voice.reset_mock()
+    reply3 = dispatcher.process_command("cambia de micrófono al inexistente")
+    voice.set_microphone.assert_not_called()
+    assert "No encontré ningún micrófono" in reply3
+
+

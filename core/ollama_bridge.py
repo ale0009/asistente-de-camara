@@ -36,7 +36,7 @@ class OllamaBridge:
         except requests.exceptions.RequestException:
             return []
 
-    def query(self, prompt: str, model: str = None, json_mode: bool = False, max_tokens: int = 220) -> str:
+    def query(self, prompt: str, model: str = None, json_mode: bool = False, max_tokens: int = 220, system: str = None) -> str:
         """
         Envía un prompt a Ollama y retorna la respuesta.
         Esta llamada es sincrónica y puede bloquear, se recomienda ejecutar en un hilo.
@@ -53,16 +53,12 @@ class OllamaBridge:
             "model": model,
             "prompt": prompt,
             "stream": False,
-            # Mantiene el modelo cargado en memoria/VRAM entre llamadas.
-            # Sin esto, Ollama lo descarga apenas termina cada respuesta y cada
-            # consulta paga ~7-8s de recarga antes de generar un solo token.
             "keep_alive": "10m",
-            # qwen3 genera tokens de "razonamiento" internos antes de responder;
-            # eso puede sumar varios segundos que el usuario nunca ve. Se apaga
-            # por defecto para priorizar velocidad sobre razonamiento profundo.
             "think": False,
             "options": {"num_predict": max_tokens},
         }
+        if system:
+            payload["system"] = system
         if json_mode:
             payload["format"] = "json"
         
@@ -88,6 +84,42 @@ class OllamaBridge:
             return "La respuesta de la inteligencia artificial tardó demasiado."
         except requests.exceptions.RequestException as e:
             logger.error(f"Error de red consultando a Ollama: {e}")
+            return "No me pude conectar con el servidor local de Ollama."
+
+    def query_chat(self, messages: list, model: str = None, json_mode: bool = False, max_tokens: int = 300) -> str:
+        """
+        Envía un historial de mensajes (lista de dicts con role y content)
+        al endpoint /api/chat de Ollama y retorna el texto de la respuesta.
+        """
+        if not model:
+            model = self.default_model
+
+        url = f"{self.host}/api/chat"
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "keep_alive": "10m",
+            "think": False,
+            "options": {"num_predict": max_tokens},
+        }
+        if json_mode:
+            payload["format"] = "json"
+
+        try:
+            logger.info(f"Enviando chat a Ollama ({model}) con {len(messages)} mensajes...")
+            response = requests.post(url, json=payload, timeout=60)
+            
+            if response.status_code == 200:
+                data = response.json()
+                reply = data.get("message", {}).get("content", "").strip()
+                logger.info(f"Respuesta de chat de Ollama recibida ({len(reply)} chars)")
+                return reply
+            else:
+                logger.error(f"Error de Ollama chat HTTP {response.status_code}")
+                return "Hubo un error de comunicación con la IA local."
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error de red consultando a Ollama chat: {e}")
             return "No me pude conectar con el servidor local de Ollama."
 
     def query_stream(self, prompt: str, model: str = None, max_tokens: int = 220):

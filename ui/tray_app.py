@@ -72,7 +72,8 @@ class NovaTrayApp:
 
     def start(self):
         self.tray_icon.show()
-        logger.info("NovaTrayApp iniciada en la bandeja del sistema")
+        self.show_panel()
+        logger.info("NovaTrayApp iniciada en la bandeja del sistema con panel flotante abierto.")
 
     def show_panel(self):
         if self.dispatcher:

@@ -66,6 +66,26 @@ class SystemController:
             logger.error(f"Error silenciando volumen: {e}")
             return "Hubo un error con el control de audio"
 
+    def set_volume(self, percentage: float) -> str:
+        """Ajusta el volumen general del sistema a un porcentaje específico (0 a 100) usando pycaw."""
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+            try:
+                devices = AudioUtilities.GetSpeakers()
+                interface = devices.Activate(
+                    IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                volume = cast(interface, POINTER(IAudioEndpointVolume))
+                # SetMasterVolumeLevelScalar acepta float de 0.0 a 1.0
+                volume.SetMasterVolumeLevelScalar(percentage / 100.0, None)
+                logger.info(f"Volumen ajustado con pycaw al {percentage}%")
+                return f"Volumen ajustado al {int(percentage)} por ciento"
+            finally:
+                pythoncom.CoUninitialize()
+        except Exception as e:
+            logger.error(f"Error ajustando volumen con pycaw: {e}")
+            return "No pude ajustar el volumen general"
+
     def close_application(self, app_name: str) -> str:
         """Intenta cerrar una aplicación buscando su nombre en los procesos."""
         app_name = app_name.lower()

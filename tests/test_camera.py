@@ -156,7 +156,7 @@ def test_get_available_cameras_mocks(monkeypatch):
 
 def test_set_camera_updates_config_and_releases(tmp_path, monkeypatch):
     temp_config = tmp_path / "config.yaml"
-    temp_config.write_text("camera:\n  camera_index: 0\n  camera_name: 'OBSBOT'", encoding="utf-8")
+    temp_config.write_text("camera:\n  camera_index: 0\n  device_name: 'OBSBOT'", encoding="utf-8")
     
     monkeypatch.chdir(tmp_path)
     
@@ -177,4 +177,4 @@ def test_set_camera_updates_config_and_releases(tmp_path, monkeypatch):
     with open("config.yaml", "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     assert cfg["camera"]["camera_index"] == 1
-    assert cfg["camera"]["camera_name"] == "Nueva Cámara"
+    assert cfg["camera"]["device_name"] == "Nueva Cámara"

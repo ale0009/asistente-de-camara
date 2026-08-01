@@ -134,6 +134,14 @@ class GestureEngine:
         if sum(fingers_up) == 0 and landmarks[THUMB_TIP].y < landmarks[THUMB_IP].y and pinch_dist > 0.08:
             return "pulgar_arriba"
 
+        # Pulgar Abajo (Dislike)
+        if sum(fingers_up) == 0 and landmarks[THUMB_TIP].y > landmarks[THUMB_IP].y and pinch_dist > 0.08:
+            return "pulgar_abajo"
+
+        # OK (Pellizco de pulgar e índice, otros tres dedos arriba)
+        if fingers_up == [0, 1, 1, 1] and pinch_dist < 0.06:
+            return "ok"
+
         # 3. Puño (Todos abajo)
         if sum(fingers_up) == 0 and pinch_dist > 0.1:
             return "puno"

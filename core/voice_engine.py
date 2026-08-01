@@ -167,29 +167,26 @@ class VoiceEngine:
 
     def _listen_loop(self):
         """Bucle principal: detecta wake word → graba comando → procesa con Whisper."""
-        try:
-            stream = self._open_stream()
-        except Exception as exc:
-            # Antes esto escapaba sin capturar (estaba fuera del try/except
-            # de abajo): el hilo moría en silencio vía el excepthook por
-            # defecto y NOVA se quedaba sin voz el resto de la sesión sin
-            # ningún aviso. Ahora se loggea y se avisa a quien esté escuchando
-            # (main.py lo conecta a un toast visible en la UI).
-            logger.error("No se pudo abrir el micrófono (mic_index=%s): %s",
-                         self.config.get("mic_index"), exc)
-            if self.on_voice_engine_failed:
-                self.on_voice_engine_failed(str(exc))
-            return
+        logger.info("Bucle de escucha de voz iniciado.")
+        consecutive_failures = 0
 
-        # Se guarda en self.stream (no solo local) para que stop() pueda
-        # desbloquear una lectura en curso vía stream.stop_stream() en vez
-        # de arriesgarse a llamar pa.terminate() con este hilo todavía vivo.
-        self.stream = stream
-        logger.info("Stream de audio abierto.")
+        while self.is_running:
+            if not self.stream:
+                try:
+                    self.stream = self._open_stream()
+                    logger.info("Stream de audio abierto/reabierto.")
+                    consecutive_failures = 0
+                except Exception as exc:
+                    logger.error("No se pudo abrir el micrófono (mic_index=%s): %s",
+                                 self.config.get("mic_index"), exc)
+                    consecutive_failures += 1
+                    if consecutive_failures == 1 and self.on_voice_engine_failed:
+                        self.on_voice_engine_failed(str(exc))
+                    time.sleep(2.0)
+                    continue
 
-        try:
-            while self.is_running:
-                raw = stream.read(OWW_CHUNK, exception_on_overflow=False)
+            try:
+                raw = self.stream.read(OWW_CHUNK, exception_on_overflow=False)
                 audio_np = np.frombuffer(raw, dtype=np.int16)
 
                 if self.on_audio_level_updated and len(audio_np) > 0:
@@ -211,22 +208,38 @@ class VoiceEngine:
                         model_name = max(predictions, key=predictions.get)
                         logger.info("¡Wake word detectado! modelo=%s score=%.2f",
                                     model_name, predictions[model_name])
-                        stream.stop_stream()
+                        
+                        # Detener stream temporalmente para Whisper
+                        self.stream.stop_stream()
 
                         if self.on_wake_word_detected:
                             self.on_wake_word_detected()
 
                         # Grabar y transcribir el comando
-                        command_text = self._record_and_transcribe(stream)
+                        command_text = self._record_and_transcribe(self.stream)
                         if command_text:
                             if self.on_command_recognized:
                                 self.on_command_recognized(command_text)
 
-                        stream.start_stream()
-        except Exception as exc:
-            logger.error("Error en el bucle de escucha: %s", exc)
-        finally:
-            stream.close()
+                        if self.stream:  # Podría haber sido cambiado a None en set_microphone
+                            self.stream.start_stream()
+            except Exception as exc:
+                logger.warning("Error leyendo/procesando en stream de audio: %s. Reabriendo...", exc)
+                try:
+                    if self.stream:
+                        self.stream.close()
+                except Exception:
+                    pass
+                self.stream = None
+                time.sleep(0.5)
+
+        # Al salir, asegurar que cerramos el stream actual
+        if self.stream:
+            try:
+                self.stream.close()
+            except Exception:
+                pass
+            self.stream = None
 
     # ──────────────────────────────────────────────────────────────────────────
     # Grabación con VAD + Whisper STT
@@ -401,19 +414,18 @@ class VoiceEngine:
         except Exception as e:
             logger.error(f"Error guardando mic_index en config.yaml: {e}")
 
-        # Si el stream de escucha está corriendo, lo reiniciamos en caliente
+        # Si el stream de escucha está corriendo, lo liberamos para que el hilo de escucha lo reabra
         if self.is_running and self.stream:
-            logger.info("Reiniciando stream de PyAudio con el nuevo micrófono...")
+            logger.info("Liberando stream viejo para forzar reinicio en caliente...")
             try:
-                self.stream.stop_stream()
-                self.stream.close()
-                self.stream = self._open_stream()
-                logger.info("Stream de PyAudio reiniciado correctamente.")
+                old_stream = self.stream
+                self.stream = None
+                old_stream.stop_stream()
+                old_stream.close()
+                logger.info("Stream viejo cerrado exitosamente.")
                 return True
             except Exception as e:
-                logger.error(f"Error reiniciando stream de micrófono: {e}")
-                if self.on_voice_engine_failed:
-                    self.on_voice_engine_failed(str(e))
+                logger.error(f"Error al liberar el stream viejo de micrófono: {e}")
                 return False
         return True
 

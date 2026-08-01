@@ -1,6 +1,7 @@
+# -*- coding: utf-8 -*-
 import os
 import sys
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -70,11 +71,32 @@ def test_open_app_action_delegates_to_dispatcher():
 
 
 def test_answer_action_returns_text():
-    router, ollama, files, _ = make_router('{"action": "answer", "text": "Soy NOVA"}')
+    # Caso 1: Sin dispatcher (ej: standalone / fallback simple)
+    router, ollama, files, dispatcher = make_router('{"action": "answer"}')
+    router.dispatcher = None
+    ollama.query.side_effect = [
+        '{"action": "answer"}', # primera llamada para clasificar
+        "Soy NOVA, tu asistente local" # segunda llamada para la respuesta
+    ]
 
     reply = router.route("¿qué eres?")
+    assert reply == "Soy NOVA, tu asistente local"
+    
+    # Caso 2: Con dispatcher (flujo real con streaming de voz)
+    router, ollama, files, dispatcher = make_router('{"action": "answer"}')
+    ollama.query.return_value = '{"action": "answer"}'
+    ollama.query_stream.return_value = ["Soy ", "NOVA"]
+    dispatcher._stream_sentences.side_effect = lambda tokens: ["Soy NOVA"]
 
-    assert reply == "Soy NOVA"
+    reply_stream = router.route("¿qué eres?")
+    
+    # Consumir el generador
+    if not isinstance(reply_stream, str):
+        reply_stream = " ".join(list(reply_stream))
+        
+    assert reply_stream == "Soy NOVA"
+    ollama.query_stream.assert_called_once()
+
 
 
 def test_invalid_json_falls_back_to_raw_text():
@@ -96,11 +118,56 @@ def test_known_commands_are_interpolated_into_prompt():
 
 
 def test_route_read_document():
-    router, ollama, files, _ = make_router('{"action": "read_document", "target": "reporte_addons", "question": "¿qué dice?"}')
+    router, ollama, files, dispatcher = make_router('{"action": "read_document", "target": "reporte_addons", "question": "¿qué dice?"}')
     files.read_document = Mock(return_value="--- Documento 'reporte_addons.md' ---\nAddons instalados")
-    ollama.query.side_effect = ['{"action": "read_document", "target": "reporte_addons", "question": "¿qué dice?"}', "En el reporte dice que hay addons instalados."]
+    
+    # Mockear query_stream para retornar un iterador de tokens
+    ollama.query_stream.return_value = ["En el reporte ", "dice que hay ", "addons instalados."]
+    
+    # Mockear _stream_sentences en el dispatcher
+    dispatcher._stream_sentences.side_effect = lambda tokens: ["En el reporte dice que hay addons instalados."]
 
     reply = router.route("qué dice mi reporte de addons")
 
+    # Consumir el generador/iterable si no es un string
+    if not isinstance(reply, str):
+        reply = " ".join(list(reply))
+
     files.read_document.assert_called_once_with("reporte_addons")
     assert "addons instalados" in reply.lower()
+
+
+@patch('core.intent_router.DDGS')
+def test_research_action_runs_agentic_workflow(mock_ddgs_class, tmp_path):
+    # Setup DDGS mock
+    mock_ddgs = Mock()
+    mock_ddgs.text.return_value = [
+        {"title": "Avance Fusión", "href": "http://example.com/1", "body": "Record de energia en fusion nuclear"},
+        {"title": "Reactor Nuclear 2026", "href": "http://example.com/2", "body": "Nuevos reactores tokamak"}
+    ]
+    # Configure mock context manager
+    mock_ddgs_class.return_value.__enter__.return_value = mock_ddgs
+
+    router, ollama, files, dispatcher = make_router('{"action": "research", "topic": "fusion nuclear"}')
+    files.vault_path = str(tmp_path)
+    
+    ollama.query.side_effect = [
+        '{"action": "research", "topic": "fusion nuclear"}', # clasificacion
+        "termino 1\ntermino 2", # sub-queries
+        "# Reporte de Fusión Nuclear\nAvances importantes..." # reporte markdown
+    ]
+    ollama.query_stream.return_value = ["Investigación terminada."]
+    dispatcher._stream_sentences.side_effect = lambda tokens: ["Investigación terminada."]
+
+    reply = router.route("investiga sobre fusion nuclear")
+
+    # Consumir el generador
+    if not isinstance(reply, str):
+        reply_list = list(reply)
+        reply = " ".join(reply_list)
+
+    assert "investigación" in reply.lower()
+    # Verificar que se creó el reporte en el vault ficticio
+    report_file = tmp_path / "NOVA" / "Investigaciones" / "Investigacion - fusion nuclear.md"
+    assert report_file.exists()
+    assert "Avances importantes" in report_file.read_text(encoding="utf-8")

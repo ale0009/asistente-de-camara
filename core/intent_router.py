@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+from duckduckgo_search import DDGS
 
 from core.persona import NOVA_IDENTITY
 
@@ -14,10 +15,10 @@ con esta forma:
 
 {{"action": "search_files", "query": "..."}}
 {{"action": "read_document", "target": "...", "question": "..."}}
-{{"action": "write_note", "title": "...", "content": "..."}}
 {{"action": "run_command", "command": "..."}}
 {{"action": "open_app", "app_name": "..."}}
-{{"action": "answer", "text": "..."}}
+{{"action": "research", "topic": "..."}}
+{{"action": "answer"}}
 
 Reglas:
 - "search_files": el usuario pide buscar/encontrar la ubicación de un archivo en el equipo.
@@ -29,9 +30,8 @@ Reglas:
   {known_commands}
 - "open_app": el usuario pide abrir/lanzar un programa o aplicación. Pon en
   "app_name" solo el nombre del programa mencionado.
-- "answer": cualquier otra pregunta o conversación — responde tú mismo, breve
-  y en español, como si fueras NOVA hablando en voz alta. Si te preguntan qué
-  eres o qué puedes hacer, responde según la descripción de ti mismo de arriba.
+- "research": el usuario pide explícitamente investigar, buscar en internet, buscar en la web, o realizar una investigación o reporte sobre un tema (ej. "investiga sobre X", "busca en internet qué es Y"). Pon el tema de investigación en "topic".
+- "answer": cualquier otra pregunta o conversación general, saludo o charla. No agregues campos adicionales de texto en este JSON.
 Incluye solo los campos de la acción elegida.
 
 Comando del usuario: "{command}"
@@ -86,8 +86,19 @@ class IntentRouter:
             return self._handle_run_command(data.get("command", ""))
         if action == "open_app":
             return self._handle_open_app(data.get("app_name", ""))
+        if action == "research":
+            return self._handle_research(data.get("topic", ""))
         if action == "answer":
-            return data.get("text", "").strip() or "No tengo una respuesta para eso."
+            ans_prompt = (
+                f"{NOVA_IDENTITY}\n"
+                f"Responde a esta pregunta o conversación del usuario, de forma concisa "
+                f"(máximo 3 oraciones) y en español: {text}"
+            )
+            if self.dispatcher:
+                tokens = self.ollama.query_stream(ans_prompt)
+                return self.dispatcher._stream_sentences(tokens)
+            else:
+                return self.ollama.query(ans_prompt)
 
         logger.warning(f"Acción desconocida del clasificador: {data}")
         return "No entendí ese comando."
@@ -132,7 +143,7 @@ class IntentRouter:
             return "No tengo configurado un vault de Obsidian para anotar."
         return f"Anotado en {os.path.basename(path)}"
 
-    def _handle_read_document(self, target: str, question: str = "") -> str:
+    def _handle_read_document(self, target: str, question: str = ""):
         target = (target or "").strip()
         if not target:
             return "¿Qué documento quieres que lea?"
@@ -145,4 +156,104 @@ class IntentRouter:
             f"Con base en la siguiente información del documento:\n{doc_text}\n\n"
             f"Responde a esta pregunta o solicitud del usuario en voz alta, de forma concisa y en español: {question or 'Resume qué dice este documento.'}"
         )
-        return self.ollama.query(rag_prompt)
+        
+        if self.dispatcher:
+            tokens = self.ollama.query_stream(rag_prompt)
+            return self.dispatcher._stream_sentences(tokens)
+        else:
+            return self.ollama.query(rag_prompt)
+
+    def _handle_research(self, topic: str):
+        topic = (topic or "").strip()
+        if not topic:
+            return "No especificaste qué tema investigar."
+
+        def _research_stream():
+            yield f"Entendido, estoy iniciando una investigación en internet sobre {topic}. Por favor espera un momento..."
+            
+            try:
+                # 1. Generar sub-búsquedas para Ollama
+                sub_queries_prompt = (
+                    f"Necesito investigar sobre: {topic}.\n"
+                    f"Genera exactamente 2 términos de búsqueda concisos para buscar en Google/DuckDuckGo en español.\n"
+                    f"Responde ÚNICAMENTE con los 2 términos separados por salto de línea, sin números ni texto adicional."
+                )
+                raw_queries = self.ollama.query(sub_queries_prompt)
+                queries = [q.strip() for q in raw_queries.split("\n") if q.strip()]
+                if not queries:
+                    queries = [topic]
+                else:
+                    queries = queries[:3]
+                
+                logger.info(f"Sub-búsquedas generadas para investigación: {queries}")
+                
+                # 2. Buscar en DuckDuckGo
+                search_results = []
+                with DDGS() as ddgs:
+                    for query in queries:
+                        try:
+                            results = ddgs.text(query, max_results=4)
+                            for r in results:
+                                search_results.append({
+                                    "title": r.get("title", ""),
+                                    "link": r.get("href", ""),
+                                    "snippet": r.get("body", "")
+                                })
+                        except Exception as e:
+                            logger.error(f"Error buscando en DDG para '{query}': {e}")
+                
+                if not search_results:
+                    yield "No logré obtener resultados de internet para esta investigación."
+                    return
+                
+                # 3. Compilar los snippets recopilados
+                compiled_context = ""
+                for idx, res in enumerate(search_results[:8]):
+                    compiled_context += f"--- Fuente [{idx+1}]: {res['title']} ({res['link']}) ---\n{res['snippet']}\n\n"
+                
+                # 4. Generar el reporte Markdown vía Ollama
+                report_prompt = (
+                    f"{NOVA_IDENTITY}\n"
+                    f"Eres un agente de investigación experto. Has recopilado la siguiente información de internet "
+                    f"sobre el tema: '{topic}':\n\n"
+                    f"{compiled_context}\n"
+                    f"Escribe un reporte de investigación detallado en Markdown. "
+                    f"Debe ser claro, profesional y estructurado con secciones (Introducción, Avances Clave, Conclusiones y Fuentes). "
+                    f"Utiliza español de manera impecable."
+                )
+                report_markdown = self.ollama.query(report_prompt)
+                
+                # 5. Escribir reporte en Obsidian
+                safe_title = "".join(c for c in topic if c.isalnum() or c in " -_").strip() or "Investigacion"
+                filename = f"Investigacion - {safe_title}"
+                obsidian_folder = "NOVA/Investigaciones"
+                
+                notes_dir = os.path.join(self.files.vault_path, obsidian_folder)
+                os.makedirs(notes_dir, exist_ok=True)
+                file_path = os.path.join(notes_dir, f"{filename}.md")
+                
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(report_markdown)
+                
+                logger.info(f"Reporte de investigación guardado en {file_path}")
+                
+                # 6. Generar una breve lectura final en streaming
+                summary_prompt = (
+                    f"{NOVA_IDENTITY}\n"
+                    f"Con base en el reporte que acabas de escribir:\n{report_markdown[:2000]}\n\n"
+                    f"Resume en 2 o 3 oraciones concisas y fáciles de entender en voz alta los hallazgos principales, "
+                    f"mencionando que has guardado el reporte en tu Obsidian."
+                )
+                tokens = self.ollama.query_stream(summary_prompt)
+                for sentence in self.dispatcher._stream_sentences(tokens):
+                    yield sentence
+                    
+            except Exception as e:
+                logger.exception("Error durante la investigación agentica")
+                yield "Hubo un error al realizar la investigación en internet."
+
+        if self.dispatcher:
+            return _research_stream()
+        else:
+            # Síncrono fallback
+            return f"No tengo configurado el dispatcher para streaming de investigación."

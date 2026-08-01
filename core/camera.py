@@ -140,7 +140,7 @@ class CameraController:
                     cfg["camera"] = {}
                 cfg["camera"]["camera_index"] = index
                 if device_name:
-                    cfg["camera"]["camera_name"] = device_name
+                    cfg["camera"]["device_name"] = device_name
                 with open("config.yaml", "w", encoding="utf-8") as f:
                     yaml.safe_dump(cfg, f, default_flow_style=False, allow_unicode=True)
                 logger.info("config.yaml actualizado con la nueva cámara.")
@@ -173,26 +173,53 @@ class CameraController:
         else:
             logger.info(f"Usando camera_index de config.yaml como fallback: {self.camera_index}")
 
-        logger.info(f"Intentando abrir cámara en índice {self.camera_index}...")
-        # cv2.CAP_DSHOW es mejor en Windows
+        logger.info(f"Intentando abrir cámara en índice {self.camera_index} (DirectShow)...")
         cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
 
-        if not cap.isOpened():
-            logger.error(f"No se pudo abrir la cámara en el índice {self.camera_index}")
+        if cap.isOpened():
+            ret, _ = cap.read()
+            if ret:
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                self.cap = cap
+                logger.info(f"¡Cámara abierta exitosamente en índice {self.camera_index} (DirectShow)!")
+                return True
             cap.release()
-            return False
 
-        ret, _ = cap.read()
-        if not ret:
-            logger.error("La cámara se abrió pero no puede leer frames.")
+        # Reintento 1: Probar Media Foundation (MSMF) si DirectShow falla por bloqueo
+        logger.info(f"DirectShow falló en índice {self.camera_index}; probando Media Foundation (MSMF)...")
+        cap = cv2.VideoCapture(self.camera_index, cv2.CAP_MSMF)
+        if cap.isOpened():
+            ret, _ = cap.read()
+            if ret:
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                self.cap = cap
+                logger.info(f"¡Cámara abierta exitosamente en índice {self.camera_index} (MSMF)!")
+                return True
             cap.release()
-            return False
 
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        self.cap = cap
-        logger.info(f"¡Cámara abierta exitosamente en índice {self.camera_index}!")
-        return True
+        # Reintento 2: Buscar cualquier otra cámara conectada en los índices alternativos
+        logger.info("Buscando índices alternativos de cámara conectados...")
+        avail = get_available_cameras()
+        for idx in avail:
+            if idx == self.camera_index:
+                continue
+            logger.info(f"Probando cámara alternativa en índice {idx} ({avail[idx]})...")
+            cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+            if cap.isOpened():
+                ret, _ = cap.read()
+                if ret:
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                    self.camera_index = idx
+                    self.cap = cap
+                    logger.info(f"¡Cámara alternativa abierta exitosamente en índice {idx} ({avail[idx]})!")
+                    return True
+                cap.release()
+
+        logger.error("No se pudo abrir ninguna cámara disponible en el sistema.")
+        return False
 
     def start(self):
         """Inicia la captura de la cámara en un hilo en segundo plano."""

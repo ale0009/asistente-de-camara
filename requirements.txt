@@ -18,6 +18,10 @@ PyQt6-Qt6>=6.7.0
 pyyaml>=6.0.1
 numpy>=1.26.0
 requests>=2.31.0
+duckduckgo-search>=8.1.1
+fastapi>=0.110.0
+uvicorn>=0.28.0
+websockets>=12.0
 
 # Desarrollo / tests
 pytest>=8.0.0

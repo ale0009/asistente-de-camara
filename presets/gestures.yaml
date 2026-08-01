@@ -9,3 +9,5 @@ gestures:
   victoria: "captura de pantalla"
   apuntar: "toma una foto"
   pulgar_arriba: "resetea la cámara"
+  pulgar_abajo: "silencia"
+  ok: "modo presentación"

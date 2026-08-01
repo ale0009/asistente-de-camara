@@ -48,3 +48,48 @@ def test_gesture_engine_recognize_pulgar_arriba():
     landmarks[INDEX_TIP].y = 0.6
     
     assert engine._recognize_gesture(landmarks) == "pulgar_arriba"
+
+
+def test_gesture_engine_recognize_pulgar_abajo():
+    engine = GestureEngine.__new__(GestureEngine)
+    landmarks = make_dummy_landmarks()
+    
+    # Todos los dedos abajo
+    for tip, pip in [(INDEX_TIP, INDEX_PIP), (MIDDLE_TIP, MIDDLE_PIP), (RING_TIP, RING_PIP), (PINKY_TIP, PINKY_PIP)]:
+        landmarks[tip].y = 0.6
+        landmarks[pip].y = 0.4
+        
+    # Pulgar abajo (y de tip mayor que IP)
+    landmarks[THUMB_TIP].x = 0.5
+    landmarks[THUMB_TIP].y = 0.5
+    landmarks[THUMB_IP].y = 0.3
+    
+    # Distancia pinch razonable (> 0.08)
+    landmarks[INDEX_TIP].x = 0.7
+    landmarks[INDEX_TIP].y = 0.6
+    
+    assert engine._recognize_gesture(landmarks) == "pulgar_abajo"
+
+
+def test_gesture_engine_recognize_ok():
+    engine = GestureEngine.__new__(GestureEngine)
+    landmarks = make_dummy_landmarks()
+    
+    # OK: index down (0), middle, ring, pinky up (1, 1, 1)
+    # Index down:
+    landmarks[INDEX_TIP].y = 0.6
+    landmarks[INDEX_PIP].y = 0.4
+    
+    # Middle, Ring, Pinky up:
+    for tip, pip in [(MIDDLE_TIP, MIDDLE_PIP), (RING_TIP, RING_PIP), (PINKY_TIP, PINKY_PIP)]:
+        landmarks[tip].y = 0.2
+        landmarks[pip].y = 0.4
+        
+    # Pinch distance is small (< 0.06)
+    landmarks[THUMB_TIP].x = 0.50
+    landmarks[THUMB_TIP].y = 0.50
+    landmarks[INDEX_TIP].x = 0.52
+    landmarks[INDEX_TIP].y = 0.52
+    
+    assert engine._recognize_gesture(landmarks) == "ok"
+
