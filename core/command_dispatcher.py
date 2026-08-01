@@ -227,6 +227,14 @@ class CommandDispatcher:
             app_name = text.replace("cierra", "").strip()
             return self.system.close_application(app_name) if self.system else "Sin control de sistema"
 
+        # 3.5. Comandos de Inferencia Visual (Moondream)
+        vision_keywords = [
+            "qué ves", "que ves", "qué hay en la cámara", "que hay en la camara",
+            "describe la escena", "describe lo que ves", "qué tengo en la mano", "que tengo en la mano"
+        ]
+        if any(vk in text for vk in vision_keywords):
+            return self._handle_vision_query(text)
+
         # 4. Consultas directas a Ollama (frase explícita, sin pasar por el clasificador)
         if "pregúntale a ollama" in text or "dile a ollama" in text:
             prompt = text.replace("pregúntale a ollama", "").replace("dile a ollama", "").strip()
@@ -235,6 +243,7 @@ class CommandDispatcher:
                 tokens = self.ollama.query_stream(prompt)
                 return self._stream_sentences(tokens)
             return "No tengo configurado a Ollama."
+
 
         # 5. Cualquier otro comando libre: lo interpreta el clasificador de intención
         # (buscar archivos, tomar notas, o responder como conversación normal).
@@ -359,3 +368,22 @@ class CommandDispatcher:
                 return f"No pude cambiar al micrófono {best_name}"
         else:
             return f"No encontré ningún micrófono que coincida con {name_query}"
+
+    def _handle_vision_query(self, text: str) -> str:
+        """Captura el frame actual de la cámara e invoca la inferencia visual con Moondream."""
+        if not self.ollama:
+            return "No tengo configurado el puente de IA local para visión."
+        if not self.camera:
+            return "No tengo acceso a la cámara para capturar la imagen."
+
+        frame = getattr(self.camera, "current_frame", None)
+        if frame is None:
+            return "La cámara está apagada o no está produciendo video actualmente."
+
+        prompt_clean = "Describe brevemente en español (máximo 2 oraciones) lo que ves en la imagen."
+        if "mano" in text:
+            prompt_clean = "Describe en español el objeto o elemento que la persona sostiene en la mano."
+
+        logger.info(f"Procesando inferencia visual Moondream: '{prompt_clean}'")
+        return self.ollama.query_vision(prompt_clean, frame, model="moondream")
+
