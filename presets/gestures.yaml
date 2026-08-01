@@ -11,3 +11,4 @@ gestures:
   pulgar_arriba: "resetea la cámara"
   pulgar_abajo: "silencia"
   ok: "modo presentación"
+  tres_dedos: "modo trabajo"

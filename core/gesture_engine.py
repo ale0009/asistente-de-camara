@@ -146,16 +146,20 @@ class GestureEngine:
         if sum(fingers_up) == 0 and pinch_dist > 0.1:
             return "puno"
 
-        # 4. Pellizco / Zoom continuo
+        # 4. Tres Dedos (Índice, Medio y Anular arriba, Meñique abajo)
+        if fingers_up == [1, 1, 1, 0]:
+            return "tres_dedos"
+
+        # 5. Pellizco / Zoom continuo
         if sum(fingers_up) <= 1 and pinch_dist < 0.20:
             zoom_val = int(max(0, min(100, (pinch_dist - 0.03) / 0.15 * 100)))
             return f"zoom_{zoom_val}"
 
-        # 5. Paz (V) - Índice y Medio arriba
+        # 6. Paz / Victoria (V) - Índice y Medio arriba
         if fingers_up == [1, 1, 0, 0]:
             return "victoria"
 
-        # 6. Apuntar (Solo índice arriba)
+        # 7. Apuntar (Solo índice arriba)
         if fingers_up == [1, 0, 0, 0]:
             return "apuntar"
 

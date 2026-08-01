@@ -93,3 +93,46 @@ def test_gesture_engine_recognize_ok():
     
     assert engine._recognize_gesture(landmarks) == "ok"
 
+
+def test_gesture_engine_recognize_palma_abierta():
+    engine = GestureEngine.__new__(GestureEngine)
+    landmarks = make_dummy_landmarks()
+    
+    # Todos los 4 dedos principales arriba
+    for tip, pip in [(INDEX_TIP, INDEX_PIP), (MIDDLE_TIP, MIDDLE_PIP), (RING_TIP, RING_PIP), (PINKY_TIP, PINKY_PIP)]:
+        landmarks[tip].y = 0.2
+        landmarks[pip].y = 0.4
+        
+    assert engine._recognize_gesture(landmarks) == "palma_abierta"
+
+
+def test_gesture_engine_recognize_puno():
+    engine = GestureEngine.__new__(GestureEngine)
+    landmarks = make_dummy_landmarks()
+    
+    # Todos los dedos abajo
+    for tip, pip in [(INDEX_TIP, INDEX_PIP), (MIDDLE_TIP, MIDDLE_PIP), (RING_TIP, RING_PIP), (PINKY_TIP, PINKY_PIP)]:
+        landmarks[tip].y = 0.6
+        landmarks[pip].y = 0.4
+        
+    landmarks[THUMB_TIP].x = 0.1
+    landmarks[INDEX_TIP].x = 0.5
+    
+    assert engine._recognize_gesture(landmarks) == "puno"
+
+
+def test_gesture_engine_recognize_tres_dedos():
+    engine = GestureEngine.__new__(GestureEngine)
+    landmarks = make_dummy_landmarks()
+    
+    # Índices, Medio y Anular arriba
+    for tip, pip in [(INDEX_TIP, INDEX_PIP), (MIDDLE_TIP, MIDDLE_PIP), (RING_TIP, RING_PIP)]:
+        landmarks[tip].y = 0.2
+        landmarks[pip].y = 0.4
+        
+    # Meñique abajo
+    landmarks[PINKY_TIP].y = 0.6
+    landmarks[PINKY_PIP].y = 0.4
+    
+    assert engine._recognize_gesture(landmarks) == "tres_dedos"
+
