@@ -31,7 +31,7 @@ HERRAMIENTAS MCP DISPONIBLES:
 {json.dumps(tools_summary, indent=2, ensure_ascii=False)}
 
 REGLAS DE CLASIFICACIÓN:
-1. Si el usuario pide leer/escribir notas, buscar en el Vault, abrir una app, ajustar volumen o tomar captura, debes elegir "mcp_tool_call" indicando tool_name y los arguments exactos.
+1. Si el usuario pide controlar la cámara (mover gimbal, tracking, zoom, presets, suspender/despertar, describir la escena con visión), leer/escribir notas, buscar en el Vault, abrir una app, ajustar volumen, tomar captura o buscar en la web, debes elegir "mcp_tool_call" indicando tool_name y los arguments exactos.
 2. Si el usuario pide una tarea pesada de procesamiento de video o distilación de documentos largos, responde "celery_task".
 3. En cualquier otro caso conversacional o de consulta general, responde "direct_answer".
 

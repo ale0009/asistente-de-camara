@@ -201,3 +201,40 @@ def test_select_microphone_by_voice(tmp_path):
     assert "No encontré ningún micrófono" in reply3
 
 
+def test_lunch_mode_command(tmp_path):
+    osc = Mock()
+    system = Mock()
+    dispatcher = make_dispatcher(tmp_path, osc=osc, system=system)
+    reply = dispatcher.process_command("hora de almuerzo")
+    osc.sleep_camera.assert_called_once()
+    assert "almuerzo" in reply.lower()
+
+
+def test_doctor_check_command(tmp_path):
+    ollama = Mock()
+    ollama.check_connection.return_value = True
+    ollama.get_models.return_value = ["qwen3:8b"]
+    ollama.resolve_model.return_value = "qwen3:8b"
+    dispatcher = make_dispatcher(tmp_path, ollama=ollama)
+
+    reply = dispatcher.process_command("diagnóstico")
+    assert "Diagnóstico NOVA" in reply
+
+
+def test_language_tutor_start_and_end(tmp_path):
+    ollama = Mock()
+    ollama.query.return_value = "Hello, let's practice English!"
+    voice = Mock()
+    voice.tts_voice = "es-CO-SalomeNeural"
+    dispatcher = make_dispatcher(tmp_path, ollama=ollama, voice=voice)
+
+    reply_start = dispatcher.process_command("practiquemos inglés")
+    assert "English" in reply_start or "práctica" in reply_start.lower()
+    assert dispatcher.language_tutor.active_session is not None
+
+    reply_end = dispatcher.process_command("volver a español")
+    assert "finalizada" in reply_end.lower()
+    assert dispatcher.language_tutor.active_session is None
+
+
+

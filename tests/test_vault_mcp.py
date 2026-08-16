@@ -57,5 +57,61 @@ class TestVaultMCPServer(unittest.TestCase):
         self.assertTrue(search_res["success"])
         self.assertGreaterEqual(search_res["count"], 1)
 
+    def test_read_blocks_path_traversal(self):
+        result = self.server.execute_tool("vault_read_note", {
+            "relative_path": "../../fuera.md"
+        })
+
+        self.assertFalse(result["success"])
+        self.assertIn("salir del Vault", result["error"])
+
+    def test_write_blocks_absolute_and_non_markdown_paths(self):
+        absolute = os.path.abspath(os.path.join(self.temp_dir.name, "..", "fuera.md"))
+        absolute_result = self.server.execute_tool("vault_write_note", {
+            "relative_path": absolute,
+            "content": "No debe escribirse."
+        })
+        non_markdown_result = self.server.execute_tool("vault_write_note", {
+            "relative_path": "Notas/secreto.txt",
+            "content": "No debe escribirse."
+        })
+
+        self.assertFalse(absolute_result["success"])
+        self.assertFalse(non_markdown_result["success"])
+        self.assertIn("rutas absolutas", absolute_result["error"])
+        self.assertIn("Markdown", non_markdown_result["error"])
+
+    def test_list_and_summarize_projects(self):
+        # Crear estructura de proyecto en el vault temporal
+        self.server.execute_tool("vault_write_note", {
+            "relative_path": "Blender/addons.md",
+            "content": "# Proyecto Blender\n- [ ] Actualizar addon de materiales\n- [x] Configurar atajos"
+        })
+        self.server.execute_tool("vault_write_note", {
+            "relative_path": "Blender/arquitectura.md",
+            "content": "## Arquitectura de Render\nDetalles del motor."
+        })
+
+        list_res = self.server.execute_tool("vault_list_projects", {})
+        self.assertTrue(list_res["success"])
+        self.assertGreaterEqual(list_res["count"], 1)
+
+        summary_res = self.server.execute_tool("vault_summarize_project", {"project_name": "Blender"})
+        self.assertTrue(summary_res["success"])
+        self.assertEqual(summary_res["project"], "Blender")
+        self.assertEqual(summary_res["tasks_pending"], 1)
+        self.assertEqual(summary_res["tasks_completed"], 1)
+
+    def test_scan_pending_tasks(self):
+        self.server.execute_tool("vault_write_note", {
+            "relative_path": "Proyectos/Camara/tareas.md",
+            "content": "- [ ] Implementar nuevo filtro\n- [ ] Calibrar tracking\n- [x] Probar OSC"
+        })
+
+        tasks_res = self.server.execute_tool("vault_scan_pending_tasks", {})
+        self.assertTrue(tasks_res["success"])
+        self.assertGreaterEqual(tasks_res["total_pending"], 2)
+
 if __name__ == "__main__":
     unittest.main()
+

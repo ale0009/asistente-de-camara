@@ -72,3 +72,20 @@ assistant:
   # Subcarpeta del vault de Obsidian donde se guardan las notas libres
   # (distinto del log automático de sesión en obsidian.nova_folder/Sesiones).
   notes_folder: "NOVA/Notas"
+
+llm:
+  # ─── Modelos de Inferencia Local (Ollama) ──────────────────────────────
+  # Modelos recomendados:
+  # - "qwen3:8b" (Máxima precisión en español y razonamiento agéntico)
+  # - "qwen3:4b" (Tiempo real ultra-rápido, <200ms latencia a primer token)
+  # - "hermes3:8b" (Optimizado para tool calling / function calling)
+  # - "llama3.2:3b" (Ultra ligero)
+  model: "qwen3:8b"
+  vision_model: "moondream"
+  fallback_models:
+    - "qwen3:4b"
+    - "hermes3:8b"
+    - "llama3.2:3b"
+  stream_sentences: true
+  temperature: 0.2
+  max_tokens: 220

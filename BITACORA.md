@@ -4,6 +4,29 @@
 
 ---
 
+## Ronda 7 — Arquitectura Modular Dinámica (Hot-Plug), Inteligencia Profunda de Proyectos Obsidian, Gestor de Agenda y Tutor Políglota (2026-08-16)
+
+**Qué se hizo:**
+- **Auto-descubrimiento y Hot-Reload de Plugins MCP (`agent_service/mcp_client.py`):** Reemplazo de registro estático por descubrimiento reflexivo automático de cualquier clase `*MCPServer` en `mcp_servers/`, con aislamiento total de fallos por plugin y soporte de recarga en caliente (`reload_plugins()`).
+- **Segundo Cerebro e Inteligencia de Proyectos en Obsidian (`mcp_servers/vault_mcp.py`):** Nuevas herramientas agénticas: `vault_list_projects`, `vault_summarize_project` (resumen ejecutivo de estado de proyecto) y `vault_scan_pending_tasks` (extracción de checklists `- [ ]`).
+- **Gestor de Agenda y Rutina de Almuerzo (`mcp_servers/agenda_mcp.py`):** Módulo de time-blocking, temporizadores Pomodoro, registro de tareas y `agenda_lunch_break` (suspensión automática de cámara, silenciado de volumen y registro en Obsidian).
+- **Tutor Políglota de Conversación en Tiempo Real (`mcp_servers/language_tutor_mcp.py`):** Práctica interactiva en Inglés, Francés, Chino (Mandarín) y Japonés con conmutación dinámica de voces nativas TTS de alta fidelidad (`en-US-JennyNeural`, `fr-FR-DeniseNeural`, `zh-CN-XiaoxiaoNeural`, `ja-JP-NanamiNeural`) y correcciones pedagógicas.
+- **Auto-Diagnóstico de Salud del Sistema (`mcp_servers/doctor_mcp.py`):** Chequeo en vivo de subsistemas (cámara DirectShow, puerto OSC, Ollama LLM, micrófonos, espacio en disco y Obsidian Vault).
+- **Atajos de Voz en CommandDispatcher (`core/command_dispatcher.py`):** Comandos por voz para *"hora de almuerzo"*, *"practiquemos inglés/francés/chino/japonés"*, *"resumen de proyectos"*, *"tareas pendientes"* y *"diagnóstico"*.
+- **133 Tests Unitarios Pasando al 100% (`tests/`):** Cobertura exhaustiva con pruebas añadidas en `tests/test_agenda_mcp.py`, `tests/test_language_tutor_mcp.py`, `tests/test_doctor_mcp.py`, `tests/test_vault_mcp.py` y `tests/test_command_dispatcher.py`.
+
+---
+
+## Ronda 6 — Plataforma Agéntica MCP Unificada, Servidor MCP de Cámara y Modelos de Tiempo Real (2026-08-16)
+
+**Qué se hizo:**
+- **Servidor MCP de Cámara y Visión Multimodal (`mcp_servers/camera_mcp.py` & `agent_service/mcp_client.py`):** Creación del servidor MCP que expone herramientas estandarizadas para `camera_wake_sleep`, `camera_set_tracking`, `camera_set_zoom`, `camera_move_gimbal`, `camera_trigger_preset`, `camera_set_scene_mode` y `camera_describe_scene` (visión Moondream).
+- **Resolución Dinámica de Modelos e Inferencia de Tiempo Real (`core/ollama_bridge.py` & `config.yaml`):** Soporte en configuración para selección de modelos de baja latencia (`qwen3:8b`, `qwen3:4b`, `hermes3:8b`, `llama3.2:3b`), caché de modelos disponibles y fallback inteligente automático si el modelo seleccionado no está instalado.
+- **Unificación de Reglas del Router Semántico (`agent_service/intent_router.py`):** Expansión del clasificador semántico para gobernar las herramientas de cámara, vault, desktop, web, git y n8n bajo el mismo estándar MCP.
+- **114 Tests Unitarios Pasando al 100% (`tests/`):** Creación de `tests/test_camera_mcp.py` y ampliación de `tests/test_ollama_bridge.py` garantizando robustez y cobertura total.
+
+---
+
 ## Ronda 5 — Suite de Innovación Avanzada, RAG Obsidian y Empaquetado Portable .exe (2026-07-19)
 
 **Qué se hizo:**

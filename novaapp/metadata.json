@@ -1,0 +1,6 @@
+{
+  "name": "NOVA Command Center",
+  "description": "Asistente local de cámara inteligente, control multimodal, seguimiento PTZ y gestión agéntica.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

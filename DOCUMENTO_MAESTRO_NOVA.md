@@ -1,10 +1,10 @@
 # DOCUMENTO MAESTRO DE ESPECIFICACIÓN INTEGRAL — PROYECTO NOVA
 ## Asistente Local de Cámara Inteligente, Control Multimodal y Arquitectura Agéntica MCP
 
-> **Fecha de Emisión:** 31 de Julio de 2026  
-> **Versión del Sistema:** 3.1.0 (Plataforma Agéntica Multimodal Unificada MCP)  
+> **Fecha de Emisión:** 16 de Agosto de 2026  
+> **Versión del Sistema:** 3.3.0 (Arquitectura Modular Dinámica MCP Hot-Plug, Segundo Cerebro & Tutor Políglota de Proyectos)  
 > **Repositorio de Origen:** `E:\proyectos\Camara inteligente`  
-> **Estado de Calidad:** 84 Tests Unitarios Pasando al 100% | Lanzador Unificado `start_nova_agent.py` Operativo  
+> **Estado de Calidad:** 135 Tests Unitarios Pasando al 100% | Lanzador Unificado `start_nova_agent.py` Operativo  
 
 ---
 
@@ -15,8 +15,14 @@
 3. **DESGLOSE EXHAUSTIVO MÓDULO POR MÓDULO**
    - 3.1. Lanzador Unificado: `start_nova_agent.py`
    - 3.2. Orquestación Agéntica FastAPI: `agent_service/main.py`, `agent_loop.py` & `intent_router.py`
-   - 3.3. Gestión MCP & Auditoría: `agent_service/mcp_client.py` & `agent_service/audit_logger.py`
-   - 3.4. Servidores MCP Modulares: `mcp_servers/vault_mcp.py`, `desktop_mcp.py`, `n8n_mcp.py`, `git_mcp.py` & `web_search_mcp.py`
+   - 3.3. Gestión Dinámica MCP & Auditoría: `agent_service/mcp_client.py` (Auto-descubrimiento y Hot-Reload) & `agent_service/audit_logger.py`
+   - 3.4. Servidores MCP Modulares:
+     - `mcp_servers/vault_mcp.py` (Segundo Cerebro, Inteligencia de Proyectos y Extractor de Tareas)
+     - `mcp_servers/agenda_mcp.py` (Gestor de Agenda Diaria, Rutina de Almuerzo y Pomodoro)
+     - `mcp_servers/language_tutor_mcp.py` (Tutor Políglota EN, FR, ZH, JA con cambio dinámico de voces TTS)
+     - `mcp_servers/doctor_mcp.py` (Auto-Diagnóstico de Salud del Sistema y Auto-Reparación)
+     - `mcp_servers/camera_mcp.py` (Control PTZ OSC y Visión Moondream)
+     - `mcp_servers/desktop_mcp.py`, `n8n_mcp.py`, `git_mcp.py` & `web_search_mcp.py`
    - 3.5. Percepción Visual y Gestual: `core/camera.py` & `core/gesture_engine.py`
    - 3.6. Percepción Auditiva y Canal Desacoplado: `core/voice_engine.py` & `voice_service/voice_client.py`
    - 3.7. Observadores en Tiempo Real: `watchers/file_watcher.py`
@@ -81,11 +87,12 @@ Ofrecer una experiencia de asistencia agéntica inteligente de latencia ultrabaj
 - **`audit_logger.py`:** Trazabilidad SQL en `agent_audit_log`.
 
 ### 3.4. Servidores MCP Modulares (`mcp_servers/`)
-1. **`vault_mcp.py`:** Obsidian Vault MCP (`vault_search`, `vault_read_note`, `vault_write_note`) con `OverwriteError`.
-2. **`desktop_mcp.py`:** Windows Desktop MCP (`desktop_launch_app`, `desktop_set_volume`, `desktop_take_screenshot`).
-3. **`n8n_mcp.py`:** n8n Automation MCP (`n8n_trigger_workflow`).
-4. **`git_mcp.py`:** Git Repository MCP (`git_status`, `git_recent_commits`).
-5. **`web_search_mcp.py`:** Web Search MCP (`web_read_page`).
+1. **`camera_mcp.py`:** OBSBOT Camera & Vision MCP (`camera_wake_sleep`, `camera_set_tracking`, `camera_set_zoom`, `camera_move_gimbal`, `camera_trigger_preset`, `camera_set_scene_mode`, `camera_describe_scene`).
+2. **`vault_mcp.py`:** Obsidian Vault MCP (`vault_search`, `vault_read_note`, `vault_write_note`) con `OverwriteError`.
+3. **`desktop_mcp.py`:** Windows Desktop MCP (`desktop_launch_app`, `desktop_set_volume`, `desktop_take_screenshot`).
+4. **`n8n_mcp.py`:** n8n Automation MCP (`n8n_trigger_workflow`).
+5. **`git_mcp.py`:** Git Repository MCP (`git_status`, `git_recent_commits`).
+6. **`web_search_mcp.py`:** Web Search MCP (`web_read_page`).
 
 ### 3.5. Percepción Visual y Gestual: `core/camera.py` & `core/gesture_engine.py`
 - Captura OpenCV DirectShow a 30 FPS, enumeración `pygrabber` y procesamiento MediaPipe Tasks (`HandLandmarker`).

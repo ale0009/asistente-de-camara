@@ -6,6 +6,7 @@ Expone endpoints REST y WebSocket para interacción con el Agent Loop, consulta 
 import logging
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from agent_service.agent_loop import AgentLoop
@@ -17,7 +18,16 @@ logger = logging.getLogger("NOVA.AgentService")
 app = FastAPI(
     title="NOVA Agentic Service (MCP Architecture)",
     description="Servidor de agencia local desacoplado basado en Model Context Protocol (MCP)",
-    version="1.0.0"
+    version="3.2.0"
+)
+
+# Habilitar CORS para permitir conexión sin fricción desde el Web Command Center y dashboards locales
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 agent_loop = AgentLoop()
@@ -32,7 +42,20 @@ def read_root():
     return {
         "service": "NOVA Agentic Service",
         "status": "online",
+        "version": "3.2.0",
         "architecture": "MCP (Model Context Protocol)"
+    }
+
+@app.get("/v1/health")
+def health_check():
+    """Chequeo de salud del servicio agéntico y conectividad con Ollama."""
+    ollama_ok = agent_loop.ollama.check_connection() if agent_loop.ollama else False
+    tools_count = len(mcp_manager.get_all_tools_schema())
+    return {
+        "status": "healthy" if ollama_ok else "degraded",
+        "ollama_connected": ollama_ok,
+        "active_model": agent_loop.ollama.resolve_model() if agent_loop.ollama else "unknown",
+        "tools_registered": tools_count
     }
 
 @app.post("/v1/agent/interact")

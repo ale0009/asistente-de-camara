@@ -1,0 +1,10 @@
+{
+  "name": "NOVA Command Center",
+  "description": "Tactical professional command center with video posture analysis, focus mode, warrior stats, and daily mission management.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

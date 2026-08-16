@@ -9,6 +9,7 @@ Arranca en un solo comando:
 import os
 import sys
 import time
+import signal
 import logging
 import subprocess
 import threading
@@ -33,6 +34,26 @@ def main():
     logger.info("   Iniciando Plataforma Agéntica NOVA / Segundo Cerebro  ")
     logger.info("==========================================================")
 
+    agent_proc = None
+    watcher = None
+    nova = None
+
+    def _signal_handler(sig, frame):
+        logger.info("Señal de interrupción recibida, cerrando servicios...")
+        if watcher:
+            watcher.stop()
+        if agent_proc and agent_proc.poll() is None:
+            agent_proc.terminate()
+        if nova:
+            nova.stop()
+        sys.exit(0)
+
+    try:
+        signal.signal(signal.SIGINT, _signal_handler)
+        signal.signal(signal.SIGTERM, _signal_handler)
+    except Exception:
+        pass
+
     # 1. Iniciar FastAPI Agent Service
     agent_proc = start_agent_service()
     time.sleep(1.5)
@@ -49,7 +70,8 @@ def main():
         logger.error(f"Error ejecutando la aplicación principal de NOVA: {e}")
     finally:
         logger.info("Cerrando servicios de NOVA...")
-        watcher.stop()
+        if watcher:
+            watcher.stop()
         if agent_proc and agent_proc.poll() is None:
             agent_proc.terminate()
         logger.info("Plataforma NOVA apagada correctamente.")

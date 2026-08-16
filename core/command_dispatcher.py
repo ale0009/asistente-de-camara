@@ -94,7 +94,20 @@ class CommandDispatcher:
             "modo transmision": lambda: self._activate_presentation_mode(),
             "inicia grabación": lambda: "Iniciando grabación en OBS Studio",
             "detén grabación": lambda: "Deteniendo grabación en OBS Studio",
+            "hora de almuerzo": self._activate_lunch_mode,
+            "hora del almuerzo": self._activate_lunch_mode,
+            "modo almuerzo": self._activate_lunch_mode,
+            "resumen de proyectos": self._handle_projects_query,
+            "mis proyectos": self._handle_projects_query,
+            "proyectos en obsidian": self._handle_projects_query,
+            "tareas pendientes": self._handle_tasks_query,
+            "mis tareas": self._handle_tasks_query,
+            "diagnóstico": self._handle_doctor_check,
+            "diagnostico": self._handle_doctor_check,
+            "estado del sistema": self._handle_doctor_check,
         }
+
+        self.language_tutor = None
 
     def _activate_presentation_mode(self) -> str:
         """Modo Presentación / Stream / Reunión: despierta la cámara, enciende tracking y acomoda el zoom."""
@@ -235,6 +248,24 @@ class CommandDispatcher:
         if any(vk in text for vk in vision_keywords):
             return self._handle_vision_query(text)
 
+        # 3.6. Comandos de Práctica de Idiomas (Language Tutor)
+        if "practiquemos inglés" in text or "practicar inglés" in text or "practicar ingles" in text or "practiquemos ingles" in text:
+            return self._start_language_practice("en", "conversación general")
+        if "practiquemos francés" in text or "practicar francés" in text or "practicar frances" in text or "practiquemos frances" in text:
+            return self._start_language_practice("fr", "conversation générale")
+        if "practiquemos chino" in text or "practicar chino" in text:
+            return self._start_language_practice("zh", "日常对话")
+        if "practiquemos japonés" in text or "practicar japonés" in text or "practicar japones" in text or "practiquemos japones" in text:
+            return self._start_language_practice("ja", "日常会話")
+        if "volver a español" in text or "terminar práctica" in text or "fin de la práctica" in text:
+            return self._end_language_practice()
+
+        # Si hay una sesión de tutor de idiomas activa, responder con el tutor
+        if getattr(self, "language_tutor", None) and self.language_tutor.active_session:
+            tutor_res = self.language_tutor.execute_tool("language_converse", {"user_message": text})
+            if tutor_res.get("success"):
+                return tutor_res.get("response", "")
+
         # 4. Consultas directas a Ollama (frase explícita, sin pasar por el clasificador)
         if "pregúntale a ollama" in text or "dile a ollama" in text:
             prompt = text.replace("pregúntale a ollama", "").replace("dile a ollama", "").strip()
@@ -243,7 +274,6 @@ class CommandDispatcher:
                 tokens = self.ollama.query_stream(prompt)
                 return self._stream_sentences(tokens)
             return "No tengo configurado a Ollama."
-
 
         # 5. Cualquier otro comando libre: lo interpreta el clasificador de intención
         # (buscar archivos, tomar notas, o responder como conversación normal).
@@ -386,4 +416,106 @@ class CommandDispatcher:
 
         logger.info(f"Procesando inferencia visual Moondream: '{prompt_clean}'")
         return self.ollama.query_vision(prompt_clean, frame, model="moondream")
+
+    def _activate_lunch_mode(self) -> str:
+        """Modo Almuerzo: suspende cámara, silencia volumen y registra en Obsidian."""
+        from mcp_servers.agenda_mcp import AgendaMCPServer
+        agenda = AgendaMCPServer(
+            vault_path=self.config.get("obsidian", {}).get("vault_path", "D:\\Documentos\\Obsidian Vault"),
+            nova_folder=self.config.get("obsidian", {}).get("nova_folder", "NOVA"),
+            osc_controller=self.osc,
+            system_controller=self.system
+        )
+        res = agenda.execute_tool("agenda_lunch_break", {"duration_minutes": 60})
+        try:
+            from ui.panel_widget import show_toast
+            show_toast("Modo Almuerzo 🍲", "Cámara suspendida. ¡Buen provecho!", success=True)
+        except Exception:
+            pass
+        return res.get("message", "Modo almuerzo activado. ¡Buen provecho!")
+
+    def _handle_projects_query(self) -> str:
+        """Escanea y resume los proyectos documentados en Obsidian."""
+        from mcp_servers.vault_mcp import ObsidianVaultMCPServer
+        vault = ObsidianVaultMCPServer(
+            vault_path=self.config.get("obsidian", {}).get("vault_path", "D:\\Documentos\\Obsidian Vault")
+        )
+        res = vault.execute_tool("vault_list_projects", {})
+        if not res.get("success") or not res.get("projects"):
+            return "No encontré proyectos documentados en tu Vault de Obsidian."
+        
+        projects = res.get("projects", [])
+        project_names = [p["name"] for p in projects[:6]]
+        return f"Tienes {len(projects)} proyectos en Obsidian: {', '.join(project_names)}. Puedes pedirme que resuma cualquiera de ellos."
+
+    def _handle_tasks_query(self) -> str:
+        """Escanea las tareas pendientes en Obsidian."""
+        from mcp_servers.vault_mcp import ObsidianVaultMCPServer
+        vault = ObsidianVaultMCPServer(
+            vault_path=self.config.get("obsidian", {}).get("vault_path", "D:\\Documentos\\Obsidian Vault")
+        )
+        res = vault.execute_tool("vault_scan_pending_tasks", {})
+        if not res.get("success") or not res.get("tasks"):
+            return "No tienes tareas pendientes marcadas como checklist en tu Vault."
+        
+        tasks = res.get("tasks", [])
+        tasks_preview = "; ".join(t["task"] for t in tasks[:3])
+        return f"Tienes {res.get('total_pending', len(tasks))} tareas pendientes. Las primeras son: {tasks_preview}."
+
+    def _handle_doctor_check(self) -> str:
+        """Ejecuta auto-diagnóstico del sistema."""
+        from mcp_servers.doctor_mcp import DoctorMCPServer
+        doctor = DoctorMCPServer(
+            ollama_bridge=self.ollama,
+            camera_controller=self.camera,
+            osc_controller=self.osc,
+            vault_path=self.config.get("obsidian", {}).get("vault_path", "D:\\Documentos\\Obsidian Vault")
+        )
+        res = doctor.execute_tool("doctor_health_check", {})
+        diag = res.get("diagnostics", {})
+        ollama_status = diag.get("ollama", {}).get("status", "desconocido")
+        disk_free = diag.get("disk_space", {}).get("free_gb", "desconocido")
+        return f"Diagnóstico NOVA: Sistema {res.get('overall_status', 'OPERATIONAL')}. IA Ollama: {ollama_status}. Espacio libre: {disk_free} GB."
+
+    def _start_language_practice(self, lang: str, topic: str) -> str:
+        """Inicia sesión de tutor técnico de idiomas con contexto de proyectos."""
+        from mcp_servers.language_tutor_mcp import LanguageTutorMCPServer
+        from mcp_servers.vault_mcp import ObsidianVaultMCPServer
+
+        if not self.language_tutor:
+            self.language_tutor = LanguageTutorMCPServer(ollama_bridge=self.ollama, voice_engine=self.voice)
+
+        # Extraer contexto de proyectos de Obsidian para enriquecer la conversación técnica
+        project_context = ""
+        try:
+            vault = ObsidianVaultMCPServer(
+                vault_path=self.config.get("obsidian", {}).get("vault_path", "D:\\Documentos\\Obsidian Vault")
+            )
+            # Buscar proyecto coincidente si se menciona en el tema
+            matched_proj = "Blender" if "blender" in topic.lower() else "NOVA"
+            summary_res = vault.execute_tool("vault_summarize_project", {"project_name": matched_proj})
+            if summary_res.get("success"):
+                project_context = summary_res.get("summary", "")
+        except Exception:
+            pass
+
+        res = self.language_tutor.execute_tool("language_start_session", {
+            "language": lang,
+            "topic": topic,
+            "project_context": project_context
+        })
+        try:
+            from ui.panel_widget import show_toast
+            show_toast(f"Mentor de {lang.upper()} 🌍", f"Tema: {topic}", success=True)
+        except Exception:
+            pass
+        return res.get("first_message") or res.get("message", f"Práctica de {lang} iniciada.")
+
+    def _end_language_practice(self) -> str:
+        """Finaliza la sesión de tutor de idiomas."""
+        if not self.language_tutor or not self.language_tutor.active_session:
+            return "No hay ninguna sesión de idiomas activa."
+        
+        res = self.language_tutor.execute_tool("language_end_session", {})
+        return res.get("message", "Práctica de idiomas finalizada.")
 

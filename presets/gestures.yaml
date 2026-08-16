@@ -12,3 +12,6 @@ gestures:
   pulgar_abajo: "silencia"
   ok: "modo presentación"
   tres_dedos: "modo trabajo"
+  rock: "sube el volumen"
+  mano_l: "siguiente ventana"
+  cuatro_dedos: "modo descanso"

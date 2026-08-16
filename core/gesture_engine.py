@@ -120,14 +120,18 @@ class GestureEngine:
             else:
                 fingers_up.append(0)
 
-        # Calcular distancia entre pulgar e índice (para el pellizco)
+        # Distancia entre pulgar e índice tip (para pellizco) y pulgar e índice PIP (para extensión del pulgar)
         thumb_tip = landmarks[THUMB_TIP]
         index_tip = landmarks[INDEX_TIP]
+        index_pip = landmarks[INDEX_PIP]
 
         pinch_dist = math.hypot(thumb_tip.x - index_tip.x, thumb_tip.y - index_tip.y)
+        thumb_pip_dist = math.hypot(thumb_tip.x - index_pip.x, thumb_tip.y - index_pip.y)
 
-        # 1. Palma Abierta (Todos arriba)
+        # 1. Palma Abierta vs Cuatro Dedos (según extensión del pulgar)
         if sum(fingers_up) == 4:
+            if thumb_pip_dist < 0.12:
+                return "cuatro_dedos"
             return "palma_abierta"
 
         # 2. Pulgar Arriba (Like)
@@ -150,17 +154,23 @@ class GestureEngine:
         if fingers_up == [1, 1, 1, 0]:
             return "tres_dedos"
 
-        # 5. Pellizco / Zoom continuo
+        # 5. Rock / Cuernos (Índice y Meñique arriba)
+        if fingers_up == [1, 0, 0, 1]:
+            return "rock"
+
+        # 6. Pellizco / Zoom continuo
         if sum(fingers_up) <= 1 and pinch_dist < 0.20:
             zoom_val = int(max(0, min(100, (pinch_dist - 0.03) / 0.15 * 100)))
             return f"zoom_{zoom_val}"
 
-        # 6. Paz / Victoria (V) - Índice y Medio arriba
+        # 7. Paz / Victoria (V) - Índice y Medio arriba
         if fingers_up == [1, 1, 0, 0]:
             return "victoria"
 
-        # 7. Apuntar (Solo índice arriba)
+        # 8. Apuntar vs Mano L (Índice arriba con pulgar guardado o extendido)
         if fingers_up == [1, 0, 0, 0]:
+            if thumb_pip_dist > 0.18:
+                return "mano_l"
             return "apuntar"
 
         return None

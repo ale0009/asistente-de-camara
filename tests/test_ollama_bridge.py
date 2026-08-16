@@ -79,3 +79,27 @@ def test_query_stream_success():
     assert payload["stream"] is True
     assert payload["keep_alive"] == "10m"
     assert payload["think"] is False
+
+
+def test_resolve_model_finds_exact_match():
+    bridge = OllamaBridge()
+    with patch.object(bridge, "get_models", return_value=["qwen3:8b", "moondream:latest"]):
+        resolved = bridge.resolve_model("qwen3:8b")
+        assert resolved == "qwen3:8b"
+
+
+def test_resolve_model_falls_back_when_missing():
+    bridge = OllamaBridge()
+    bridge.fallback_models = ["qwen3:4b", "hermes3:8b"]
+    with patch.object(bridge, "get_models", return_value=["qwen3:4b", "moondream:latest"]):
+        resolved = bridge.resolve_model("modelo_no_instalado")
+        assert resolved == "qwen3:4b"
+
+
+def test_resolve_model_picks_first_available_as_last_resort():
+    bridge = OllamaBridge()
+    bridge.fallback_models = ["hermes3:8b"]
+    with patch.object(bridge, "get_models", return_value=["gemma4:latest"]):
+        resolved = bridge.resolve_model("modelo_no_instalado")
+        assert resolved == "gemma4:latest"
+

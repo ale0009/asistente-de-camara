@@ -45,5 +45,32 @@ class TestFileWatcher(unittest.TestCase):
 
         mock_urlopen.assert_called_once()
 
+    @patch("urllib.request.urlopen")
+    def test_watcher_ignores_logs_and_database_files(self, mock_urlopen):
+        logs_dir = os.path.join(self.temp_dir.name, "logs")
+        os.makedirs(logs_dir)
+        with open(os.path.join(logs_dir, "agent_audit.db"), "w") as f:
+            f.write("evento interno")
+        with open(os.path.join(self.temp_dir.name, "normal.md"), "w") as f:
+            f.write("nota")
+
+        snapshot = self.watcher._take_snapshot()
+
+        self.assertEqual(len(snapshot), 1)
+        self.assertTrue(next(iter(snapshot)).endswith("normal.md"))
+        mock_urlopen.assert_not_called()
+
+    @patch("urllib.request.urlopen")
+    def test_watcher_applies_cooldown_per_file(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        path = os.path.join(self.temp_dir.name, "normal.md")
+        self.watcher._notify_agent(path)
+        self.watcher._notify_agent(path)
+
+        mock_urlopen.assert_called_once()
+
 if __name__ == "__main__":
     unittest.main()

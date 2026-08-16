@@ -176,13 +176,18 @@ class NovaAssistant:
             # Lo consumimos en un hilo secundario para no bloquear el bucle de escucha de voz
             def _consume_stream():
                 texto_completo = []
+                first = True
                 for oracion in respuesta:
                     if oracion and oracion.strip():
                         self.voice.speak(oracion)
                         texto_completo.append(oracion)
+                        if first:
+                            show_toast("NOVA Hablando ⚡", oracion, success=True)
+                            first = False
                 
                 respuesta_completa = " ".join(texto_completo)
-                show_toast("Comando de Voz", respuesta_completa, success=True)
+                if not first:
+                    show_toast("Comando de Voz", respuesta_completa, success=True)
                 if self.config['obsidian']['log_voice_commands']:
                     self.logger_db.log_action("Voz", text, respuesta_completa)
             

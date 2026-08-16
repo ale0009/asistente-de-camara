@@ -29,6 +29,10 @@ class NovaTrayApp:
         self.action_panel = QAction("Abrir panel principal")
         self.action_panel.triggered.connect(self.show_panel)
         self.menu.addAction(self.action_panel)
+
+        self.action_web_center = QAction("🌐 Abrir Command Center (Web)")
+        self.action_web_center.triggered.connect(self.open_web_center)
+        self.menu.addAction(self.action_web_center)
         
         self.action_test_ui = QAction("Simular 'NOVA escuchando' (Prueba)")
         self.action_test_ui.triggered.connect(self.test_listening_ui)
@@ -81,6 +85,14 @@ class NovaTrayApp:
             logger.info("Panel flotante lanzado mediante dispatcher.")
         else:
             logger.warning("Dispatcher no configurado; no se puede abrir el panel.")
+
+    def open_web_center(self):
+        import webbrowser
+        import ui.panel_widget as pw
+        url = "http://localhost:5173"
+        logger.info(f"Abriendo Command Center Web en el navegador: {url}")
+        webbrowser.open(url)
+        pw.show_toast("NOVA Command Center", "Abriendo Dashboard Web...", success=True)
 
     def test_listening_ui(self):
         import ui.panel_widget as pw

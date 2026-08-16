@@ -1,17 +1,40 @@
 import requests
 import json
 import logging
+import os
+import time
+import yaml
 
 logger = logging.getLogger(__name__)
 
 class OllamaBridge:
     """
     Puente de comunicación local con Ollama (LLM local).
-    Permite hacer preguntas complejas sin necesidad de internet.
+    Permite hacer preguntas complejas sin necesidad de internet,
+    con soporte para resolución dinámica de modelos, fallbacks automáticos,
+    streaming de tokens y visión multimodal.
     """
-    def __init__(self, host="http://127.0.0.1:11434", default_model="qwen3:8b"):
-        self.host = host
-        self.default_model = default_model
+    def __init__(self, host: str = "http://127.0.0.1:11434", default_model: str = None, config_path: str = "config.yaml"):
+        self.host = host.rstrip("/")
+        self._config = self._load_config(config_path)
+        llm_cfg = self._config.get("llm", {})
+
+        self.default_model = default_model or llm_cfg.get("model", "qwen3:8b")
+        self.fallback_models = llm_cfg.get("fallback_models", ["qwen3:4b", "hermes3:8b", "llama3.2:3b"])
+        self.vision_model = llm_cfg.get("vision_model", "moondream")
+        self.temperature = float(llm_cfg.get("temperature", 0.2))
+        
+        self._cached_models = []
+        self._last_models_fetch = 0.0
+
+    def _load_config(self, path: str) -> dict:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return yaml.safe_load(f) or {}
+            except Exception as e:
+                logger.warning(f"No se pudo cargar {path} en OllamaBridge: {e}")
+        return {}
         
     def check_connection(self) -> bool:
         """Verifica si el servidor de Ollama está corriendo."""
@@ -25,16 +48,49 @@ class OllamaBridge:
             logger.warning("Ollama no está disponible localmente.")
             return False
 
-    def get_models(self):
-        """Devuelve la lista de modelos descargados en Ollama."""
+    def get_models(self, force_refresh: bool = False) -> list:
+        """Devuelve la lista de modelos descargados en Ollama (con cache de 30s)."""
+        now = time.time()
+        if not force_refresh and self._cached_models and (now - self._last_models_fetch < 30.0):
+            return self._cached_models
+
         try:
-            response = requests.get(f"{self.host}/api/tags")
+            response = requests.get(f"{self.host}/api/tags", timeout=3)
             if response.status_code == 200:
                 data = response.json()
-                return [model["name"] for model in data.get("models", [])]
-            return []
+                self._cached_models = [model["name"] for model in data.get("models", [])]
+                self._last_models_fetch = now
+                return self._cached_models
+            return self._cached_models
         except requests.exceptions.RequestException:
-            return []
+            return self._cached_models
+
+    def resolve_model(self, requested_model: str = None) -> str:
+        """
+        Resuelve el mejor modelo disponible. Si el modelo solicitado no existe en Ollama,
+        intenta los modelos de fallback configurados o el primer modelo disponible.
+        """
+        target = requested_model or self.default_model
+        available = self.get_models()
+
+        if not available:
+            return target
+
+        # 1. Coincidencia exacta o por prefijo (ej. 'qwen3:8b' con 'qwen3:8b' o 'qwen3:latest')
+        for m in available:
+            if m == target or m.split(":")[0] == target.split(":")[0]:
+                return m
+
+        # 2. Intentar modelos de fallback
+        for fb in self.fallback_models:
+            for m in available:
+                if m == fb or m.split(":")[0] == fb.split(":")[0]:
+                    logger.info(f"Modelo '{target}' no disponible; usando fallback '{m}'")
+                    return m
+
+        # 3. Primer modelo disponible como último recurso
+        logger.warning(f"Ningún modelo configurado disponible; usando primer modelo instalado '{available[0]}'")
+        return available[0]
 
     def query(self, prompt: str, model: str = None, json_mode: bool = False, max_tokens: int = 220, system: str = None) -> str:
         """
