@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=NOVA Tray Copilot
+Comment=Icono de la barra de tareas de NOVA para acceso rápido a herramientas de desarrollo
+Exec=/home/alejandro/Datos/Projects/asistente-de-camara/.venv/bin/python /home/alejandro/Datos/Projects/asistente-de-camara/ui/tray_app.py
+Icon=/home/alejandro/Datos/Projects/asistente-de-camara/assets/nova_icon.png
+Terminal=false
+Categories=Utility;Development;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true

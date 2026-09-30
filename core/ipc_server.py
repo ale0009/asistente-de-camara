@@ -112,7 +112,7 @@ class NovaIPCServer:
         logger.info("Servidor IPC UNIX detenido.")
 
 
-def send_ipc_command(request_data: Dict[str, Any], socket_path: str = DEFAULT_SOCKET_PATH, timeout: float = 8.0) -> Dict[str, Any]:
+def send_ipc_command(request_data: Dict[str, Any], socket_path: str = DEFAULT_SOCKET_PATH, timeout: float = 25.0) -> Dict[str, Any]:
     """Función cliente síncrona para que CLI o scripts envíen comandos al daemon."""
     import socket
     if not os.path.exists(socket_path):

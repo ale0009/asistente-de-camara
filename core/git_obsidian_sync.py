@@ -89,6 +89,31 @@ class GitObsidianSync:
             "projects": activity
         }
 
+    def get_dirty_projects(self) -> List[Dict[str, Any]]:
+        """Devuelve una lista rápida de proyectos que tienen cambios sin commitear."""
+        dirty = []
+        if not self.projects_dir.exists():
+            return dirty
+        for pdir in [d for d in self.projects_dir.iterdir() if d.is_dir()]:
+            git_dir = pdir / ".git"
+            if not git_dir.exists():
+                continue
+            try:
+                proc = subprocess.run(
+                    ["git", "status", "-s"],
+                    cwd=pdir, capture_output=True, text=True, timeout=2
+                )
+                lines = [l for l in proc.stdout.strip().split("\n") if l]
+                if lines:
+                    dirty.append({
+                        "name": pdir.name,
+                        "uncommitted_count": len(lines),
+                        "path": str(pdir)
+                    })
+            except Exception:
+                pass
+        return dirty
+
     def generate_standup_markdown(self, activity_data: Dict[str, Any]) -> str:
         """Convierte los datos de actividad Git en un bloque Markdown limpio para Obsidian."""
         date_str = activity_data.get("date", datetime.now().strftime("%Y-%m-%d"))

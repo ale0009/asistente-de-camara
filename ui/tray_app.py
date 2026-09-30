@@ -1,139 +1,326 @@
+# -*- coding: utf-8 -*-
+"""
+Aplicación de Bandeja del Sistema (Taskbar Companion) para NOVA 2.0 (ui/tray_app.py).
+Permite acceso instantáneo de 1 clic a todas las herramientas del copiloto:
+- Fix de terminal
+- Refactor/explicación de portapapeles
+- Captura e inspección visual
+- Git Standup automático
+- Ingesta de notas rápidas a Obsidian
+- Lanzador de 17 proyectos
+- Control de VRAM para Blender y refrigeración Turbo Fan
+"""
 import os
 import sys
+import subprocess
 import logging
-from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
-from PyQt6.QtGui import QIcon, QAction
-from PyQt6.QtCore import QCoreApplication
+from pathlib import Path
+from typing import Dict, Any, List
 
-# Importar la función que crea el panel flotante
-from ui.panel_widget import launch_panel
+from PyQt6.QtWidgets import (
+    QApplication, QSystemTrayIcon, QMenu, QInputDialog,
+    QLineEdit, QMessageBox
+)
+from PyQt6.QtGui import QIcon, QAction, QPixmap
+from PyQt6.QtCore import Qt, QTimer, QLockFile, QDir
 
-logger = logging.getLogger(__name__)
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from core.ipc_server import send_ipc_command, DEFAULT_SOCKET_PATH
+
+logger = logging.getLogger("NOVA.TrayApp")
+
+LOCK_FILE = os.path.join(QDir.tempPath(), "nova_tray.lock")
+ICON_PATH = str(ROOT_DIR / "assets" / "nova_icon.png")
+
 
 class NovaTrayApp:
-    """Aplicación que vive en la bandeja del sistema y lanza el panel flotante de NOVA."""
-    def __init__(self, app: QApplication, dispatcher=None, on_exit=None):
+    def __init__(self, app: QApplication):
         self.app = app
-        self.dispatcher = dispatcher
-        self.on_exit = on_exit
-        self._exit_done = False
-        self.app.aboutToQuit.connect(self._handle_exit)
-        self.tray_icon = QSystemTrayIcon(self.app)
-        
-        # Icono de la bandeja
-        try:
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            icon_path = os.path.join(base_dir, "assets", "nova_icon.png")
-            if os.path.exists(icon_path):
-                self.tray_icon.setIcon(QIcon(icon_path))
-        except Exception as e:
-            logger.warning(f"No se pudo cargar el icono de la bandeja: {e}")
-        self.tray_icon.setToolTip("NOVA - Asistente IA")
-        
-        # Menú contextual
-        self.menu = QMenu()
-        self.action_panel = QAction("Abrir panel principal")
-        self.action_panel.triggered.connect(self.show_panel)
-        self.menu.addAction(self.action_panel)
+        self.hud_instance = None
+        self.projects_cache: List[Dict[str, Any]] = []
+        self.dirty_projects_cache: List[Dict[str, Any]] = []
 
-        self.action_web_center = QAction("🌐 Abrir Command Center (Web)")
-        self.action_web_center.triggered.connect(self.open_web_center)
-        self.menu.addAction(self.action_web_center)
-        
-        self.action_test_ui = QAction("Simular 'NOVA escuchando' (Prueba)")
-        self.action_test_ui.triggered.connect(self.test_listening_ui)
-        self.menu.addAction(self.action_test_ui)
-        
-        # Submenú Modos de Escena
-        self.menu_modes = QMenu("Modos de Escena", self.menu)
-        
-        self.action_mode_pres = QAction("🎥 Modo Presentación", self.menu_modes)
-        self.action_mode_pres.triggered.connect(lambda: self._trigger_mode("modo presentación"))
-        self.menu_modes.addAction(self.action_mode_pres)
+        self.tray = QSystemTrayIcon(self.app)
+        self._setup_icon()
+        self._build_context_menu()
+        self._setup_timers()
 
-        self.action_mode_work = QAction("💻 Modo Trabajo", self.menu_modes)
-        self.action_mode_work.triggered.connect(lambda: self._trigger_mode("modo trabajo"))
-        self.menu_modes.addAction(self.action_mode_work)
+        # Conectar eventos de clic en el icono de la bandeja
+        self.tray.activated.connect(self._on_tray_activated)
 
-        self.action_mode_rest = QAction("🌙 Modo Descanso / Privacidad", self.menu_modes)
-        self.action_mode_rest.triggered.connect(lambda: self._trigger_mode("modo descanso"))
-        self.menu_modes.addAction(self.action_mode_rest)
-
-        self.menu.addMenu(self.menu_modes)
-
-        self.menu.addSeparator()
-        self.action_exit = QAction("Salir")
-        self.action_exit.triggered.connect(self.exit_app)
-        self.menu.addAction(self.action_exit)
-        self.tray_icon.setContextMenu(self.menu)
-
-        # También abrir el panel con click o doble click
-        self.tray_icon.activated.connect(self.on_tray_activated)
-
-    def _trigger_mode(self, mode_command: str):
-        if self.dispatcher:
-            self.dispatcher.process_command(mode_command)
+    def _setup_icon(self):
+        """Carga el icono oficial o genera un fallback."""
+        if os.path.exists(ICON_PATH):
+            self.tray.setIcon(QIcon(ICON_PATH))
         else:
-            logger.warning("Dispatcher no disponible para cambiar de modo.")
+            # Fallback simple
+            pixmap = QPixmap(32, 32)
+            pixmap.fill(Qt.GlobalColor.cyan)
+            self.tray.setIcon(QIcon(pixmap))
+        self.tray.setToolTip("NOVA 2.0 — Copiloto de Estación de Trabajo Linux")
 
-    def on_tray_activated(self, reason):
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason):
+        """Clic izquierdo: abre / alterna la paleta Spotlight HUD."""
         if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
-            self.show_panel()
+            self.toggle_spotlight_hud()
 
-    def start(self):
-        self.tray_icon.show()
-        self.show_panel()
-        logger.info("NovaTrayApp iniciada en la bandeja del sistema con panel flotante abierto.")
+    def toggle_spotlight_hud(self):
+        """Abre o enfoca la paleta Spotlight HUD."""
+        try:
+            from ui.spotlight_hud import SpotlightHUD
+            if self.hud_instance is None or not self.hud_instance.isVisible():
+                self.hud_instance = SpotlightHUD()
+                self.hud_instance.show()
+                self.hud_instance.activateWindow()
+                self.hud_instance.raise_()
+            else:
+                self.hud_instance.close()
+                self.hud_instance = None
+        except Exception as e:
+            logger.error(f"Error al alternar Spotlight HUD: {e}")
+            subprocess.Popen([sys.executable, "-m", "core.cli_handler"])
 
-    def show_panel(self):
-        if self.dispatcher:
-            launch_panel(self.dispatcher)
-            logger.info("Panel flotante lanzado mediante dispatcher.")
+    def _build_context_menu(self):
+        """Construye el menú contextual nativo de 1 clic."""
+        menu = QMenu()
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #0b1120;
+                color: #e2e8f0;
+                border: 1px solid rgba(0, 229, 255, 0.35);
+                border-radius: 8px;
+                padding: 6px;
+                font-family: 'Inter', sans-serif;
+                font-size: 11px;
+            }
+            QMenu::item {
+                padding: 6px 24px 6px 10px;
+                border-radius: 5px;
+            }
+            QMenu::item:selected {
+                background-color: rgba(0, 229, 255, 0.20);
+                color: #ffffff;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: rgba(255, 255, 255, 0.10);
+                margin: 4px 6px;
+            }
+        """)
+
+        # Cabecera de estado
+        self.header_action = QAction("🛡 NOVA 2.0 Copiloto (Conectando...)")
+        self.header_action.setEnabled(False)
+        menu.addAction(self.header_action)
+        menu.addSeparator()
+
+        # 1. Acciones Rápidas de Código
+        a_fix = QAction("🔧 Diagnosticar último fallo en terminal", menu)
+        a_fix.triggered.connect(self.action_fix)
+        menu.addAction(a_fix)
+
+        a_refactor = QAction("📋 Refactorizar portapapeles con IA", menu)
+        a_refactor.triggered.connect(self.action_clipboard_refactor)
+        menu.addAction(a_refactor)
+
+        a_explain = QAction("💡 Explicar contenido del portapapeles", menu)
+        a_explain.triggered.connect(self.action_clipboard_explain)
+        menu.addAction(a_explain)
+
+        a_inspect = QAction("📐 Capturar pantalla y analizar (OCR / Diagrama)", menu)
+        a_inspect.triggered.connect(self.action_inspect)
+        menu.addAction(a_inspect)
+
+        menu.addSeparator()
+
+        # 2. Ecosistema Obsidian & Git
+        a_standup = QAction("🚀 Sincronizar Git Standup de hoy con Obsidian", menu)
+        a_standup.triggered.connect(self.action_standup)
+        menu.addAction(a_standup)
+
+        a_note = QAction("📝 Nota rápida a Obsidian (00_Inbox)", menu)
+        a_note.triggered.connect(self.action_quick_note)
+        menu.addAction(a_note)
+
+        # Submenú dinámico de Proyectos
+        self.projects_menu = QMenu("🌐 Mis Proyectos (17)", menu)
+        menu.addMenu(self.projects_menu)
+        self._refresh_projects_menu()
+
+        menu.addSeparator()
+
+        # 3. Hardware y Rendimiento (GTX 1050 3GB Pascal)
+        a_blender = QAction("🎨 Lanzar Blender (libera VRAM de Ollama)", menu)
+        a_blender.triggered.connect(self.action_blender)
+        menu.addAction(a_blender)
+
+        a_fan = QAction("🌀 Alternar Turbo Fan (Ventilador)", menu)
+        a_fan.triggered.connect(self.action_toggle_fan)
+        menu.addAction(a_fan)
+
+        a_telem = QAction("📊 Telemetría de Estación de Trabajo", menu)
+        a_telem.triggered.connect(self.action_telemetry)
+        menu.addAction(a_telem)
+
+        menu.addSeparator()
+
+        # 4. Sistema y Salida
+        a_spotlight = QAction("🔍 Abrir paleta Spotlight (Meta + Espacio)", menu)
+        a_spotlight.triggered.connect(self.toggle_spotlight_hud)
+        menu.addAction(a_spotlight)
+
+        a_restart = QAction("🔄 Reiniciar Demonio de NOVA", menu)
+        a_restart.triggered.connect(self.action_restart_daemon)
+        menu.addAction(a_restart)
+
+        a_quit = QAction("🚪 Salir de NOVA Tray", menu)
+        a_quit.triggered.connect(self.app.quit)
+        menu.addAction(a_quit)
+
+        self.tray.setContextMenu(menu)
+
+    def _setup_timers(self):
+        """Temporizador periódico para actualizar telemetría en cabecera y estado de repositorios."""
+        self.timer = QTimer(self.app)
+        self.timer.timeout.connect(self._update_telemetry_header)
+        self.timer.start(5000) # cada 5 segundos
+        self._update_telemetry_header()
+
+        # Temporizador para refrescar proyectos y cambios git cada 30 segundos
+        self.git_timer = QTimer(self.app)
+        self.git_timer.timeout.connect(self._refresh_projects_menu)
+        self.git_timer.start(30000)
+
+    def _update_telemetry_header(self):
+        """Actualiza el texto de la cabecera del menú con telemetría viva."""
+        res = send_ipc_command({"action": "telemetry"}, timeout=2.0)
+        if res.get("status") == "success":
+            telem = res.get("result", {})
+            cpu = telem.get("cpu_percent", 0)
+            ram = telem.get("ram_percent", 0)
+            vram_used = telem.get("gpu_vram_used_mb", 0)
+            vram_tot = telem.get("gpu_vram_total_mb", 3072)
+            gpu_temp = telem.get("gpu_temp_c", 0)
+            self.header_action.setText(f"🛡 NOVA · CPU: {cpu}% · RAM: {ram}% · GPU: {gpu_temp}°C ({vram_used}/{vram_tot} MB)")
         else:
-            logger.warning("Dispatcher no configurado; no se puede abrir el panel.")
+            self.header_action.setText("🛡 NOVA Copiloto (Demonio desconectado)")
 
-    def open_web_center(self):
-        import webbrowser
-        import ui.panel_widget as pw
-        url = "http://localhost:5173"
-        logger.info(f"Abriendo Command Center Web en el navegador: {url}")
-        webbrowser.open(url)
-        pw.show_toast("NOVA Command Center", "Abriendo Dashboard Web...", success=True)
+    def _refresh_projects_menu(self):
+        """Consulta proyectos e indicadores git al daemon y reconstruye el submenú."""
+        res_projs = send_ipc_command({"action": "projects"}, timeout=3.0)
+        res_dirty = send_ipc_command({"action": "dirty_projects"}, timeout=3.0)
 
-    def test_listening_ui(self):
-        import ui.panel_widget as pw
-        pw.show_listening()
-        # Ocultar automáticamente después de 3 segundos para la prueba
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(3000, pw.hide_listening)
-        logger.info("Prueba de interfaz de escucha disparada manualmente.")
+        dirty_map = {}
+        if res_dirty.get("status") == "success":
+            for d in res_dirty.get("result", {}).get("dirty_projects", []):
+                dirty_map[d["name"]] = d["uncommitted_count"]
 
-    def _handle_exit(self):
-        if not getattr(self, "_exit_done", False):
-            self._exit_done = True
-            logger.info("Saliendo de NOVA y liberando recursos de hardware...")
-            if self.on_exit:
-                try:
-                    self.on_exit()
-                except Exception:
-                    logger.exception("Error ejecutando on_exit antes de salir")
+        if res_projs.get("status") == "success":
+            self.projects_cache = res_projs.get("result", {}).get("projects", [])
+            self.projects_menu.clear()
 
-    def exit_app(self):
-        self._handle_exit()
-        QCoreApplication.quit()
+            for p in self.projects_cache:
+                pname = p["name"]
+                dirty_count = dirty_map.get(pname, 0)
+                
+                # Indicador de cambios pendientes
+                badge = f" [● {dirty_count} cambios]" if dirty_count > 0 else ""
+                proj_sub = self.projects_menu.addMenu(f"📂 {pname}{badge}")
 
-def run_ui(dispatcher=None, on_exit=None):
-    """Arranca la QApplication y la bandeja. Se pasa opcionalmente el dispatcher.
-    El dispatcher proviene de main.py y contiene toda la lógica de comandos.
-    on_exit se invoca cuando la app se cierra (sea por la ventana o por la bandeja),
-    garantizando un apagado ordenado (NovaAssistant.stop()).
-    """
-    app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(True)
-    nova_tray = NovaTrayApp(app, dispatcher, on_exit=on_exit)
-    nova_tray.start()
-    return app.exec()
+                act_code = QAction("💻 Abrir en VS Code", proj_sub)
+                act_code.triggered.connect(lambda chk, n=pname: self._open_project(n, "code"))
+                proj_sub.addAction(act_code)
+
+                act_term = QAction("🖥 Abrir Terminal (Konsole)", proj_sub)
+                act_term.triggered.connect(lambda chk, n=pname: self._open_project(n, "terminal"))
+                proj_sub.addAction(act_term)
+
+                act_dir = QAction("📁 Abrir Carpeta", proj_sub)
+                act_dir.triggered.connect(lambda chk, n=pname: self._open_project(n, "folder"))
+                proj_sub.addAction(act_dir)
+
+    def _open_project(self, name: str, mode: str):
+        send_ipc_command({"action": "open_project", "name": name, "mode": mode})
+
+    # Acciones de 1 Clic
+    def action_fix(self):
+        subprocess.Popen([
+            "konsole", "-e", "bash", "-c",
+            "nova fix; echo ''; read -p 'Presiona Enter para cerrar...'"
+        ])
+
+    def action_clipboard_refactor(self):
+        send_ipc_command({"action": "clipboard_refactor"})
+
+    def action_clipboard_explain(self):
+        send_ipc_command({"action": "clipboard_explain"})
+
+    def action_inspect(self):
+        subprocess.Popen(["nova", "inspect"])
+
+    def action_standup(self):
+        subprocess.Popen([
+            "konsole", "-e", "bash", "-c",
+            "nova standup; echo ''; read -p 'Presiona Enter para cerrar...'"
+        ])
+
+    def action_quick_note(self):
+        text, ok = QInputDialog.getText(
+            None, "NOVA — Nota Rápida a Obsidian",
+            "Escribe tu idea, tarea o apunte (se guardará en 00_Inbox):",
+            QLineEdit.EchoMode.Normal, ""
+        )
+        if ok and text.strip():
+            send_ipc_command({"action": "quick_note", "content": text.strip()})
+
+    def action_blender(self):
+        send_ipc_command({"action": "blender"})
+
+    def action_toggle_fan(self):
+        send_ipc_command({"action": "turbo_fan", "mode": "alternar"})
+
+    def action_telemetry(self):
+        subprocess.Popen([
+            "konsole", "-e", "bash", "-c",
+            "nova status; echo ''; read -p 'Presiona Enter para cerrar...'"
+        ])
+
+    def action_restart_daemon(self):
+        try:
+            subprocess.run(["systemctl", "--user", "restart", "nova.service"], check=True)
+            self.tray.showMessage(
+                "NOVA 2.0", "Demonio de fondo reiniciado exitosamente.",
+                QSystemTrayIcon.MessageIcon.Information, 3000
+            )
+        except Exception as e:
+            logger.error(f"Error reiniciando daemon: {e}")
+
+    def show(self):
+        self.tray.show()
+
+
+def main():
+    qapp = QApplication(sys.argv)
+    qapp.setQuitOnLastWindowClosed(False)
+    qapp.setApplicationName("NOVA Copilot Tray")
+    qapp.setDesktopFileName("nova")
+
+    # Bloqueo de instancia única con manejo de bloqueos obsoletos (stale locks)
+    lock = QLockFile(LOCK_FILE)
+    lock.setStaleLockTime(2000)
+    if not lock.tryLock(150):
+        lock.removeStaleLockFile()
+        if not lock.tryLock(150):
+            print("La aplicación de bandeja de NOVA ya está en ejecución.")
+            return 0
+
+    tray_app = NovaTrayApp(qapp)
+    tray_app.show()
+    return qapp.exec()
+
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
-    sys.exit(run_ui())
+    sys.exit(main())

@@ -20,7 +20,7 @@ echo "  ✓ CLI instalado en ~/.local/bin/nova"
 
 # 2. Hook de Bash para interceptar errores de terminal
 mkdir -p "$HOME/.bashrc.d"
-cp "$PROJ_DIR/core/terminal_hook.sh" "$HOME/.bashrc.d/nova-hook.bash"
+cp "$PROJ_DIR/core/terminal_hook.bash" "$HOME/.bashrc.d/nova-hook.bash"
 chmod +x "$HOME/.bashrc.d/nova-hook.bash"
 echo "  ✓ Hook de terminal instalado en ~/.bashrc.d/nova-hook.bash"
 
@@ -45,5 +45,11 @@ cp "$PROJ_DIR/deploy/nova.service" "$HOME/.config/systemd/user/nova.service"
 systemctl --user daemon-reload
 systemctl --user enable --now nova.service
 echo "  ✓ Servicio systemd activo: nova.service"
+
+# 6. Icono residente en la bandeja del sistema (autostart)
+mkdir -p "$HOME/.config/autostart"
+cp "$PROJ_DIR/deploy/nova-tray.desktop" "$HOME/.config/autostart/nova-tray.desktop"
+chmod +x "$HOME/.config/autostart/nova-tray.desktop"
+echo "  ✓ Autostart de la bandeja instalado en ~/.config/autostart/nova-tray.desktop"
 
 echo "==> ¡Despliegue de NOVA 2.0 completado con éxito!"

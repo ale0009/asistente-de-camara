@@ -25,6 +25,8 @@ from core.git_obsidian_sync import GitObsidianSync
 from core.region_vision import RegionVision
 from core.hardware_governor import HardwareGovernor
 from core.episodic_memory import EpisodicMemory
+from core.clipboard_copilot import ClipboardCopilot
+from core.quick_note import QuickNoteIngester
 
 # Configuración de logging
 LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
@@ -54,6 +56,8 @@ class NovaDaemon:
         self.git_sync = GitObsidianSync()
         self.vision = RegionVision(ollama_bridge=self.ollama)
         self.governor = HardwareGovernor()
+        self.clipboard = ClipboardCopilot(ollama_bridge=self.ollama)
+        self.quick_note = QuickNoteIngester()
 
         # 3. Servidor IPC
         self.ipc = NovaIPCServer(socket_path=self.socket_path)
@@ -73,6 +77,11 @@ class NovaDaemon:
         self.ipc.register_handler("blender", self._handle_blender)
         self.ipc.register_handler("projects", self._handle_projects)
         self.ipc.register_handler("open_project", self._handle_open_project)
+        self.ipc.register_handler("clipboard_refactor", self._handle_clipboard_refactor)
+        self.ipc.register_handler("clipboard_explain", self._handle_clipboard_explain)
+        self.ipc.register_handler("quick_note", self._handle_quick_note)
+        self.ipc.register_handler("dirty_projects", self._handle_dirty_projects)
+        self.ipc.register_handler("turbo_fan", self._handle_turbo_fan)
 
     async def _handle_ping(self, req: Dict[str, Any]) -> Dict[str, Any]:
         uptime_sec = int(time.time() - self.start_time)
@@ -170,6 +179,30 @@ class NovaDaemon:
             msg = f"Carpeta abierta: {target_dir.name}"
 
         return {"success": True, "message": msg, "path": str(target_dir)}
+
+    async def _handle_clipboard_refactor(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        return self.clipboard.refactor()
+
+    async def _handle_clipboard_explain(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        return self.clipboard.explain()
+
+    async def _handle_quick_note(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        content = req.get("content", "").strip()
+        title = req.get("title", "")
+        return self.quick_note.save_note(content=content, title=title)
+
+    async def _handle_dirty_projects(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        dirty = self.git_sync.get_dirty_projects()
+        return {"dirty_projects": dirty}
+
+    async def _handle_turbo_fan(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        mode = req.get("mode", "alternar")
+        flag = f"--{mode}" if not mode.startswith("--") else mode
+        try:
+            proc = subprocess.run(["turbo-fan", flag], capture_output=True, text=True, timeout=4)
+            return {"success": proc.returncode == 0, "output": proc.stdout.strip()}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
 
     async def run(self):
         """Inicia el servidor IPC y se mantiene activo en segundo plano."""

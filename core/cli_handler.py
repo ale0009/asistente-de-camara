@@ -166,15 +166,68 @@ def cmd_open_project(name: str):
         print(f"{RED}✗ Error:{RESET} {res.get('message')}")
 
 
+def cmd_clipboard_refactor():
+    ensure_daemon_running()
+    print(f"{CYAN}📋 Refactorizando código del portapapeles con IA local...{RESET}")
+    res = send_ipc_command({"action": "clipboard_refactor"})
+    if res.get("status") == "success":
+        data = res.get("result", {})
+        if data.get("success"):
+            print(f"{GREEN}✓ {data.get('message')}{RESET}")
+        else:
+            print(f"{YELLOW}! {data.get('message')}{RESET}")
+    else:
+        print(f"{RED}✗ Error:{RESET} {res.get('message')}")
+
+
+def cmd_clipboard_explain():
+    ensure_daemon_running()
+    print(f"{CYAN}📋 Analizando y explicando contenido del portapapeles...{RESET}")
+    res = send_ipc_command({"action": "clipboard_explain"})
+    if res.get("status") == "success":
+        data = res.get("result", {})
+        if data.get("success"):
+            print(f"\n{BOLD}Explicación:{RESET}\n{data.get('content')}\n")
+        else:
+            print(f"{YELLOW}! {data.get('message')}{RESET}")
+    else:
+        print(f"{RED}✗ Error:{RESET} {res.get('message')}")
+
+
+def cmd_quick_note(content: str):
+    ensure_daemon_running()
+    res = send_ipc_command({"action": "quick_note", "content": content})
+    if res.get("status") == "success":
+        data = res.get("result", {})
+        if data.get("success"):
+            print(f"{GREEN}✓ {data.get('message')}{RESET}")
+        else:
+            print(f"{YELLOW}! {data.get('message')}{RESET}")
+    else:
+        print(f"{RED}✗ Error:{RESET} {res.get('message')}")
+
+
+def cmd_tray():
+    proj_dir = Path(__file__).resolve().parent.parent
+    venv_python = proj_dir / ".venv" / "bin" / "python"
+    tray_script = proj_dir / "ui" / "tray_app.py"
+    subprocess.Popen([str(venv_python), str(tray_script)], cwd=str(proj_dir))
+    print(f"{GREEN}✓ Icono de NOVA iniciado en la barra de tareas.{RESET}")
+
+
 def show_help():
     print(f"""
 {BOLD}{CYAN}NOVA 2.0 — Copiloto de Estación de Trabajo Linux (CLI){RESET}
 
 {BOLD}USO:{RESET}
   nova                         Abre la paleta de comandos Spotlight HUD
+  nova tray                    Inicia el icono en la bandeja del sistema (barra de tareas)
   nova fix                     Diagnostica y sugiere solución al último comando fallido
   nova standup                 Sincroniza commits de hoy en ~/Datos/Projects con Obsidian
   nova inspect [diagram|ocr]   Captura interactiva de región y copia resultado al portapapeles
+  nova refactor                Refactoriza el código actualmente copiado en el portapapeles
+  nova explain                 Explica en 3 viñetas el código/error del portapapeles
+  nova note "<texto>"          Guarda una nota o idea rápida en Obsidian (00_Inbox)
   nova ask "<pregunta>"        Consulta rápida al modelo local de código
   nova telemetry | status      Muestra telemetría de CPU, RAM, GPU y temperaturas
   nova blender                 Libera VRAM de la GTX 1050 y lanza Blender con PRIME offload
@@ -225,6 +278,18 @@ def main():
             print(f"{YELLOW}Uso: nova open <nombre_proyecto>{RESET}")
             return
         cmd_open_project(args[1])
+    elif subcmd in ["tray", "bandeja"]:
+        cmd_tray()
+    elif subcmd in ["refactor", "refactorizar"]:
+        cmd_clipboard_refactor()
+    elif subcmd in ["explain", "explicar"]:
+        cmd_clipboard_explain()
+    elif subcmd in ["note", "nota"]:
+        content = " ".join(args[1:]) if len(args) > 1 else ""
+        if not content:
+            print(f"{YELLOW}Uso: nova note \"tu idea o nota rápida\"{RESET}")
+            return
+        cmd_quick_note(content)
     else:
         # Si se le pasa texto libre, tratarlo como prompt directo
         cmd_ask(" ".join(args))
