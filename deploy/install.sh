@@ -39,17 +39,18 @@ if command -v kwriteconfig6 >/dev/null 2>&1; then
     echo "  ✓ Atajo global configurado en KDE Plasma: Meta+Space"
 fi
 
-# 5. Servicio de usuario en systemd
+# 5. Servicios de usuario en systemd (Daemon y Tray Companion)
 mkdir -p "$HOME/.config/systemd/user"
 cp "$PROJ_DIR/deploy/nova.service" "$HOME/.config/systemd/user/nova.service"
+cp "$PROJ_DIR/deploy/nova-tray.service" "$HOME/.config/systemd/user/nova-tray.service"
 systemctl --user daemon-reload
 systemctl --user enable --now nova.service
-echo "  ✓ Servicio systemd activo: nova.service"
+systemctl --user enable --now nova-tray.service
+echo "  ✓ Servicios systemd activos: nova.service y nova-tray.service"
 
-# 6. Icono residente en la bandeja del sistema (autostart)
-mkdir -p "$HOME/.config/autostart"
-cp "$PROJ_DIR/deploy/nova-tray.desktop" "$HOME/.config/autostart/nova-tray.desktop"
-chmod +x "$HOME/.config/autostart/nova-tray.desktop"
-echo "  ✓ Autostart de la bandeja instalado en ~/.config/autostart/nova-tray.desktop"
+# 6. Iconos de aplicación en tema hicolor
+mkdir -p "$HOME/.local/share/icons/hicolor/scalable/apps"
+cp "$PROJ_DIR/assets/nova.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/nova.svg"
+kbuildsycoca6 2>/dev/null || true
 
 echo "==> ¡Despliegue de NOVA 2.0 completado con éxito!"

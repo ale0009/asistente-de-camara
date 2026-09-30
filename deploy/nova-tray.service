@@ -1,0 +1,18 @@
+[Unit]
+Description=NOVA 2.0 - System Tray Companion (KDE Plasma)
+Documentation=https://github.com/ale0009/asistente-de-camara
+After=graphical-session.target nova.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/alejandro/Datos/Projects/asistente-de-camara
+ExecStart=/home/alejandro/Datos/Projects/asistente-de-camara/.venv/bin/python /home/alejandro/Datos/Projects/asistente-de-camara/ui/tray_app.py
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/home/alejandro/.local/bin:/usr/local/bin:/usr/bin:/bin
+KillMode=process
+
+[Install]
+WantedBy=graphical-session.target default.target

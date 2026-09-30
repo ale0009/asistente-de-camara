@@ -34,6 +34,7 @@ logger = logging.getLogger("NOVA.TrayApp")
 
 LOCK_FILE = os.path.join(QDir.tempPath(), "nova_tray.lock")
 ICON_PATH = str(ROOT_DIR / "assets" / "nova_icon.png")
+ICON_SVG = str(ROOT_DIR / "assets" / "nova.svg")
 
 
 class NovaTrayApp:
@@ -52,14 +53,19 @@ class NovaTrayApp:
         self.tray.activated.connect(self._on_tray_activated)
 
     def _setup_icon(self):
-        """Carga el icono oficial o genera un fallback."""
-        if os.path.exists(ICON_PATH):
-            self.tray.setIcon(QIcon(ICON_PATH))
-        else:
-            # Fallback simple
-            pixmap = QPixmap(32, 32)
-            pixmap.fill(Qt.GlobalColor.cyan)
-            self.tray.setIcon(QIcon(pixmap))
+        """Carga el icono oficial del tema KDE o genera un fallback."""
+        icon = QIcon.fromTheme("nova")
+        if icon.isNull():
+            if os.path.exists(ICON_SVG):
+                icon = QIcon(ICON_SVG)
+            elif os.path.exists(ICON_PATH):
+                icon = QIcon(ICON_PATH)
+            else:
+                pixmap = QPixmap(32, 32)
+                pixmap.fill(Qt.GlobalColor.cyan)
+                icon = QIcon(pixmap)
+        self.tray.setIcon(icon)
+        self.app.setWindowIcon(icon)
         self.tray.setToolTip("NOVA 2.0 — Copiloto de Estación de Trabajo Linux")
 
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason):
