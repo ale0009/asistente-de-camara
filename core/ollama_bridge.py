@@ -231,7 +231,13 @@ class OllamaBridge:
                 b64_str = base64.b64encode(image_input).decode('utf-8')
             elif hasattr(image_input, "shape"):  # Numpy array (OpenCV BGR frame)
                 import cv2
-                success, encoded_img = cv2.imencode('.jpg', image_input)
+                h, w = image_input.shape[:2]
+                max_dim = 1024
+                if max(h, w) > max_dim:
+                    scale = max_dim / float(max(h, w))
+                    new_w, new_h = int(w * scale), int(h * scale)
+                    image_input = cv2.resize(image_input, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                success, encoded_img = cv2.imencode('.jpg', image_input, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
                 if success:
                     b64_str = base64.b64encode(encoded_img.tobytes()).decode('utf-8')
                 else:
