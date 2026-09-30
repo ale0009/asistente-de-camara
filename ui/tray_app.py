@@ -136,6 +136,10 @@ class NovaTrayApp:
         a_explain.triggered.connect(self.action_clipboard_explain)
         menu.addAction(a_explain)
 
+        a_voice = QAction("🎙 Hablar con NOVA (Push-to-Talk)", menu)
+        a_voice.triggered.connect(self.action_voice)
+        menu.addAction(a_voice)
+
         a_inspect = QAction("📐 Capturar pantalla y analizar (OCR / Diagrama)", menu)
         a_inspect.triggered.connect(self.action_inspect)
         menu.addAction(a_inspect)
@@ -146,6 +150,10 @@ class NovaTrayApp:
         a_standup = QAction("🚀 Sincronizar Git Standup de hoy con Obsidian", menu)
         a_standup.triggered.connect(self.action_standup)
         menu.addAction(a_standup)
+
+        a_todos = QAction("📋 Radar de Tareas & TODOs (Obsidian)", menu)
+        a_todos.triggered.connect(self.action_todo_radar)
+        menu.addAction(a_todos)
 
         a_note = QAction("📝 Nota rápida a Obsidian (00_Inbox)", menu)
         a_note.triggered.connect(self.action_quick_note)
@@ -268,6 +276,12 @@ class NovaTrayApp:
     def action_clipboard_explain(self):
         send_ipc_command({"action": "clipboard_explain"})
 
+    def action_voice(self):
+        subprocess.Popen([
+            "konsole", "-e", "bash", "-c",
+            "nova talk 6; echo ''; read -p 'Presiona Enter para cerrar...'"
+        ])
+
     def action_inspect(self):
         subprocess.Popen(["nova", "inspect"])
 
@@ -275,6 +289,12 @@ class NovaTrayApp:
         subprocess.Popen([
             "konsole", "-e", "bash", "-c",
             "nova standup; echo ''; read -p 'Presiona Enter para cerrar...'"
+        ])
+
+    def action_todo_radar(self):
+        subprocess.Popen([
+            "konsole", "-e", "bash", "-c",
+            "nova todos; echo ''; read -p 'Presiona Enter para cerrar...'"
         ])
 
     def action_quick_note(self):

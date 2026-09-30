@@ -215,6 +215,42 @@ def cmd_tray():
     print(f"{GREEN}✓ Icono de NOVA iniciado en la barra de tareas.{RESET}")
 
 
+def cmd_voice(duration: int = 5):
+    ensure_daemon_running()
+    print(f"{CYAN}🎤 Grabando tu voz ({duration}s)... Habla ahora.{RESET}")
+    res = send_ipc_command({"action": "voice_query", "duration": duration}, timeout=25.0)
+    if res.get("status") == "success":
+        data = res.get("result", {})
+        if data.get("success"):
+            print(f"\n{BOLD}Tú dijiste:{RESET} \"{data.get('transcription')}\"")
+            print(f"{BOLD}{GREEN}NOVA responde:{RESET} {data.get('response')}")
+            print(f"{MAGENTA}(Latencia total: {data.get('latency_seconds')}s){RESET}\n")
+        else:
+            print(f"{YELLOW}! {data.get('message')}{RESET}")
+    else:
+        print(f"{RED}✗ Error:{RESET} {res.get('message')}")
+
+
+def cmd_speak(text: str):
+    ensure_daemon_running()
+    send_ipc_command({"action": "speak", "text": text})
+
+
+def cmd_todo_radar():
+    ensure_daemon_running()
+    print(f"{CYAN}📋 Escaneando comentarios TODO/FIXME en repositorios locales...{RESET}")
+    res = send_ipc_command({"action": "todo_radar"}, timeout=15.0)
+    if res.get("status") == "success":
+        data = res.get("result", {})
+        total = data.get("total_items", 0)
+        projs = data.get("projects_count", 0)
+        path = data.get("report_path", "")
+        print(f"{GREEN}✓ Radar completado:{RESET} {total} tareas detectadas en {projs} proyectos.")
+        print(f"  Reporte guardado en Obsidian: {CYAN}{path}{RESET}")
+    else:
+        print(f"{RED}✗ Error:{RESET} {res.get('message')}")
+
+
 def show_help():
     print(f"""
 {BOLD}{CYAN}NOVA 2.0 — Copiloto de Estación de Trabajo Linux (CLI){RESET}
@@ -222,6 +258,8 @@ def show_help():
 {BOLD}USO:{RESET}
   nova                         Abre la paleta de comandos Spotlight HUD
   nova tray                    Inicia el icono en la bandeja del sistema (barra de tareas)
+  nova talk | voice [segundos] Conversación por voz con Whisper GPU y Kokoro (Push-to-Talk)
+  nova todos | radar           Genera el Radar de TODOs y Deuda Técnica en Obsidian
   nova fix                     Diagnostica y sugiere solución al último comando fallido
   nova standup                 Sincroniza commits de hoy en ~/Datos/Projects con Obsidian
   nova inspect [diagram|ocr]   Captura interactiva de región y copia resultado al portapapeles
@@ -290,6 +328,15 @@ def main():
             print(f"{YELLOW}Uso: nova note \"tu idea o nota rápida\"{RESET}")
             return
         cmd_quick_note(content)
+    elif subcmd in ["voice", "talk", "voz", "habla"]:
+        dur = int(args[1]) if len(args) > 1 and args[1].isdigit() else 5
+        cmd_voice(duration=dur)
+    elif subcmd == "speak":
+        text = " ".join(args[1:]) if len(args) > 1 else ""
+        if text:
+            cmd_speak(text)
+    elif subcmd in ["todos", "radar", "deuda"]:
+        cmd_todo_radar()
     else:
         # Si se le pasa texto libre, tratarlo como prompt directo
         cmd_ask(" ".join(args))

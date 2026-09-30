@@ -27,6 +27,8 @@ from core.hardware_governor import HardwareGovernor
 from core.episodic_memory import EpisodicMemory
 from core.clipboard_copilot import ClipboardCopilot
 from core.quick_note import QuickNoteIngester
+from core.voice_bridge import VoiceBridge
+from core.todo_radar import TodoRadar
 
 # Configuración de logging
 LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
@@ -58,6 +60,8 @@ class NovaDaemon:
         self.governor = HardwareGovernor()
         self.clipboard = ClipboardCopilot(ollama_bridge=self.ollama)
         self.quick_note = QuickNoteIngester()
+        self.voice = VoiceBridge(ollama_bridge=self.ollama, memory=self.memory)
+        self.todo_radar = TodoRadar()
 
         # 3. Servidor IPC
         self.ipc = NovaIPCServer(socket_path=self.socket_path)
@@ -82,6 +86,9 @@ class NovaDaemon:
         self.ipc.register_handler("quick_note", self._handle_quick_note)
         self.ipc.register_handler("dirty_projects", self._handle_dirty_projects)
         self.ipc.register_handler("turbo_fan", self._handle_turbo_fan)
+        self.ipc.register_handler("voice_query", self._handle_voice_query)
+        self.ipc.register_handler("speak", self._handle_speak)
+        self.ipc.register_handler("todo_radar", self._handle_todo_radar)
 
     async def _handle_ping(self, req: Dict[str, Any]) -> Dict[str, Any]:
         uptime_sec = int(time.time() - self.start_time)
@@ -233,6 +240,25 @@ class NovaDaemon:
             return {"success": proc.returncode == 0, "output": proc.stdout.strip()}
         except Exception as e:
             return {"success": False, "message": str(e)}
+
+    async def _handle_voice_query(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        duration = int(req.get("duration", 5))
+        return self.voice.process_voice_query(duration_seconds=duration)
+
+    async def _handle_speak(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        text = req.get("text", "")
+        self.voice.speak(text)
+        return {"success": True}
+
+    async def _handle_todo_radar(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        data = self.todo_radar.scan_all_projects()
+        report_path = self.todo_radar.generate_obsidian_report(data)
+        return {
+            "success": True,
+            "total_items": data["total_items"],
+            "projects_count": data["projects_count"],
+            "report_path": str(report_path)
+        }
 
     async def run(self):
         """Inicia el servidor IPC y se mantiene activo en segundo plano."""
