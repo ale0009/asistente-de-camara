@@ -244,6 +244,10 @@ class NovaTrayApp:
                 act_term.triggered.connect(lambda chk, n=pname: self._open_project(n, "terminal"))
                 proj_sub.addAction(act_term)
 
+                act_obs = QAction("📝 Abrir Nota en Obsidian", proj_sub)
+                act_obs.triggered.connect(lambda chk, n=pname: self._open_project(n, "obsidian"))
+                proj_sub.addAction(act_obs)
+
                 act_dir = QAction("📁 Abrir Carpeta", proj_sub)
                 act_dir.triggered.connect(lambda chk, n=pname: self._open_project(n, "folder"))
                 proj_sub.addAction(act_dir)

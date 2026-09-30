@@ -157,16 +157,46 @@ class NovaDaemon:
     async def _handle_open_project(self, req: Dict[str, Any]) -> Dict[str, Any]:
         import subprocess
         name = req.get("name", "").strip()
-        mode = req.get("mode", "code") # code, terminal, obsidian
+        mode = req.get("mode", "code") # code, terminal, folder, obsidian
+
+        vault_projs = Path.home() / "Datos" / "Vault-Obsidian" / "proyectos"
         target_dir = Path.home() / "Datos" / "Projects" / name
 
+        # 1. Modo Obsidian: abrir directamente la nota o carpeta en Obsidian
+        if mode == "obsidian":
+            target_obs = None
+            if vault_projs.exists():
+                for p in vault_projs.iterdir():
+                    if name.lower() in p.name.lower():
+                        target_obs = p
+                        break
+            if target_obs:
+                overview_files = list(target_obs.glob("*Overview*.md")) + list(target_obs.glob("*MOC*.md")) + list(target_obs.glob("*.md"))
+                if overview_files:
+                    subprocess.Popen(["obsidian", str(overview_files[0])])
+                    return {"success": True, "message": f"Abierto en Obsidian: {overview_files[0].name}", "path": str(overview_files[0])}
+                else:
+                    subprocess.Popen(["xdg-open", str(target_obs)])
+                    return {"success": True, "message": f"Carpeta de notas abierta: {target_obs.name}", "path": str(target_obs)}
+            return {"success": False, "message": f"No se encontró documentación para '{name}' en Obsidian."}
+
+        # 2. Modos de Código, Terminal o Carpeta
         if not target_dir.exists():
-            # Buscar coincidencia parcial
+            # Buscar coincidencia parcial en ~/Datos/Projects
             candidates = list((Path.home() / "Datos" / "Projects").glob(f"*{name}*"))
             if candidates:
                 target_dir = candidates[0]
             else:
-                return {"success": False, "message": f"Proyecto '{name}' no encontrado en ~/Datos/Projects."}
+                # Si no existe en Projects pero sí en Obsidian, abrir su documentación en Obsidian
+                if vault_projs.exists():
+                    for p in vault_projs.iterdir():
+                        if name.lower() in p.name.lower():
+                            overview_files = list(p.glob("*Overview*.md")) + list(p.glob("*MOC*.md")) + list(p.glob("*.md"))
+                            if overview_files:
+                                subprocess.Popen(["obsidian", str(overview_files[0])])
+                                return {"success": True, "message": f"El código no está en ~/Datos/Projects. Abriendo su nota en Obsidian: {overview_files[0].name}", "path": str(overview_files[0])}
+
+                return {"success": False, "message": f"Proyecto '{name}' no encontrado en ~/Datos/Projects ni en Obsidian."}
 
         if mode == "code":
             subprocess.Popen(["code", str(target_dir)])
