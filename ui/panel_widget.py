@@ -5,13 +5,14 @@ Diseño: Glassmorphism · Dark Mode · Cian Eléctrico #00e5ff
 Basado en mockup aprobado por el usuario (variante 1a).
 """
 
+import sys
 import logging
 import threading
 from datetime import datetime
 
 import cv2
 from PyQt6.QtCore import (
-    Qt, QTimer, QThread, pyqtSignal, QPropertyAnimation,
+    Qt, QObject, QTimer, QThread, pyqtSignal, QPropertyAnimation,
     QEasingCurve, QRect, QPoint, QSize, QMetaObject, Q_ARG
 )
 from PyQt6.QtGui import (
@@ -349,20 +350,31 @@ class FloatingPanel(QWidget):
         # a process_command — antes cada clic lanzaba un hilo nuevo sin límite.
         self._dispatch_busy = threading.Lock()
 
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
-        )
+        flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
+        if sys.platform == "win32":
+            flags |= Qt.WindowType.Tool
+        self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self.setFixedSize(340, 524)
+        self.setFixedSize(340, 615)
 
         self._build_ui()
         self._position_near_tray()
 
         # Animación de entrada
         self._anim_in()
+
+        # Conectar puente seguro de señales entre hilos de Qt
+        bridge = get_ui_bridge()
+        bridge.frame_signal.connect(self.update_video_frame)
+        bridge.status_signal.connect(self.update_status)
+        bridge.camera_state_signal.connect(self.set_camera_state)
+
+        # Estado inicial del hardware de la cámara
+        self._camera_is_active = True
+        if self.dispatcher and hasattr(self.dispatcher, 'camera') and self.dispatcher.camera:
+            self._camera_is_active = getattr(self.dispatcher.camera, 'is_running', True)
+        self.set_camera_state(self._camera_is_active)
 
     # ── Construcción del UI ────────────────────────────────────────────────
     def _build_ui(self):
@@ -374,7 +386,7 @@ class FloatingPanel(QWidget):
         self.card = QWidget(self)
         self.card.setObjectName("card")
         self.card.setStyleSheet(self._stylesheet())
-        self.card.setFixedSize(340, 524)
+        self.card.setFixedSize(340, 615)
         root.addWidget(self.card)
 
         card_layout = QVBoxLayout(self.card)
@@ -445,6 +457,22 @@ class FloatingPanel(QWidget):
         b_lay.addWidget(self.status_label)
         lay.addWidget(badge)
 
+        # Configuración
+        btn_cfg = QPushButton("✦")
+        btn_cfg.setFixedSize(20, 20)
+        btn_cfg.setToolTip("Configuración de Hardware")
+        btn_cfg.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: none;
+                color: {TEXT_DIM};
+                font: 600 13px 'Inter';
+            }}
+            QPushButton:hover {{ color: {ACC}; }}
+        """)
+        btn_cfg.clicked.connect(self._open_config_dialog)
+        lay.addWidget(btn_cfg)
+
         # Cerrar
         btn_close = QPushButton("×")
         btn_close.setFixedSize(20, 20)
@@ -482,6 +510,7 @@ class FloatingPanel(QWidget):
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.video_label.setFixedSize(316, 178)
         self.video_label.setStyleSheet("background: #0d162e; border-radius: 8px;")
+        self.video_label.setScaledContents(True)
         vid_lay.addWidget(self.video_label)
 
         # Chips de estado encima del video
@@ -517,7 +546,77 @@ class FloatingPanel(QWidget):
         chips_h.addStretch()
 
         lay.addWidget(vid_container, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Botón Maestro de Encendido/Apagado Físico de la Cámara
+        self.btn_camera_power = QPushButton("🔴 Apagar Cámara")
+        self.btn_camera_power.setFixedSize(316, 32)
+        self.btn_camera_power.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_camera_power.clicked.connect(self._toggle_camera_power)
+        lay.addSpacing(6)
+        lay.addWidget(self.btn_camera_power, alignment=Qt.AlignmentFlag.AlignCenter)
         return w
+
+    def _toggle_camera_power(self):
+        """Alterna el estado de captura física de la cámara (LED y sensor)."""
+        if getattr(self, "_camera_is_active", True):
+            self._on_button("stop", "Apagar Cámara")
+            self.set_camera_state(False)
+        else:
+            self._on_button("wake", "Encender Cámara")
+            self.set_camera_state(True)
+
+    def set_camera_state(self, is_running: bool):
+        """Actualiza el botón de energía, status y visor según si el sensor está activo o liberado."""
+        self._camera_is_active = is_running
+        if hasattr(self, "btn_camera_power"):
+            if is_running:
+                self.btn_camera_power.setText("🔴 Apagar Cámara")
+                self.btn_camera_power.setStyleSheet("""
+                    QPushButton {
+                        background: rgba(255, 55, 55, 0.16);
+                        border: 1.5px solid rgba(255, 75, 75, 0.55);
+                        border-radius: 8px;
+                        color: #ff6b6b;
+                        font: 700 11px 'Inter';
+                        letter-spacing: 0.5px;
+                    }
+                    QPushButton:hover {
+                        background: rgba(255, 55, 55, 0.28);
+                        border: 1.5px solid #ff4444;
+                        color: #ffffff;
+                    }
+                """)
+                self.btn_camera_power.setToolTip("Detiene la captura física, apaga el LED y libera /dev/video0")
+                if hasattr(self, "status_label"):
+                    self.status_label.setText("Cámara Activa")
+                if hasattr(self, "chip_tracking"):
+                    self.chip_tracking.setText("▶ Tracking: Activo" if getattr(self.dispatcher, "gestures_active", True) else "⏸ Tracking: Pausado")
+            else:
+                self.btn_camera_power.setText("🟢 Encender Cámara")
+                self.btn_camera_power.setStyleSheet("""
+                    QPushButton {
+                        background: rgba(0, 229, 255, 0.16);
+                        border: 1.5px solid rgba(0, 229, 255, 0.55);
+                        border-radius: 8px;
+                        color: #00e5ff;
+                        font: 700 11px 'Inter';
+                        letter-spacing: 0.5px;
+                    }
+                    QPushButton:hover {
+                        background: rgba(0, 229, 255, 0.28);
+                        border: 1.5px solid #00f0ff;
+                        color: #ffffff;
+                    }
+                """)
+                self.btn_camera_power.setToolTip("Inicia la captura física y reanuda el feed de video")
+                if hasattr(self, "status_label"):
+                    self.status_label.setText("Cámara Apagada")
+                if hasattr(self, "chip_tracking"):
+                    self.chip_tracking.setText("⏸ Cámara Inactiva")
+                if hasattr(self, "video_label"):
+                    self.video_label.clear()
+                    self.video_label.setText("🌙 CÁMARA APAGADA\n(Sensor y LED desactivados)")
+                    self.video_label.setStyleSheet("background: #070d1e; border-radius: 8px; color: rgba(0, 229, 255, 0.55); font: 600 11px 'JetBrains Mono'; qproperty-alignment: AlignCenter;")
 
     def _build_log(self) -> QWidget:
         w = QWidget()
@@ -558,16 +657,18 @@ class FloatingPanel(QWidget):
         grid.setSpacing(5)
 
         buttons_data = [
-            ("☀", "Despertar", "wake",     False),
-            ("⊙", "Trackear",  "track",    True),
-            ("■", "Parar",     "stop",     False),
-            ("◉", "Captura",   "snap",     False),
-            ("⊘", "Silencio",  "mute",     False),
-            ("♪+", "Vol+",    "vol_up",   False),
-            ("♪−", "Vol−",    "vol_dn",   False),
-            ("✦", "Config",   "config",   False),
-            ("◈", "Obsidian", "obsidian", False),
-            ("?", "Ayuda",    "help",     False),
+            ("👁", "¿Qué ves?",  "vision",    True),
+            ("👆", "Señalar",    "point",     False),
+            ("📝", "OCR / Leer", "ocr",       False),
+            ("📊", "Diagrama",   "diagram",   False),
+            ("🖥", "Pantalla",   "screen",    False),
+            ("🧠", "Memoria",    "memory",    False),
+            ("◈", "Obsidian",   "obsidian",  False),
+            ("📁", "Proyectos",  "proyectos", False),
+            ("🎨", "Blender",    "blender",   False),
+            ("🌸", "Hana",       "hana",      False),
+            ("🛡", "Centinela",  "centinela", False),
+            ("⊘", "Silencio",   "mute",      False),
         ]
 
         for idx, (icon, label, cmd, primary) in enumerate(buttons_data):
@@ -579,18 +680,18 @@ class FloatingPanel(QWidget):
 
     def _make_button(self, icon: str, label: str, cmd: str, primary: bool) -> QPushButton:
         btn = QPushButton()
-        btn.setFixedSize(98, 52)
+        btn.setFixedSize(98, 42)
 
-        if primary:
+        if primary or cmd == "wake":
             style = f"""
                 QPushButton {{
-                    background: rgba(0,229,255,0.15);
-                    border: 1px solid rgba(0,229,255,0.28);
+                    background: rgba(0,229,255,0.14);
+                    border: 1px solid rgba(0,229,255,0.32);
                     border-radius: 8px;
                 }}
                 QPushButton:hover {{
                     background: rgba(0,229,255,0.25);
-                    border: 1px solid rgba(0,229,255,0.55);
+                    border: 1px solid rgba(0,229,255,0.60);
                 }}
             """
             icon_color = ACC
@@ -598,25 +699,146 @@ class FloatingPanel(QWidget):
         elif cmd == "stop":
             style = """
                 QPushButton {
-                    background: rgba(255,55,55,0.06);
-                    border: 1px solid rgba(255,55,55,0.16);
+                    background: rgba(255,55,55,0.08);
+                    border: 1px solid rgba(255,55,55,0.22);
                     border-radius: 8px;
                 }
-                QPushButton:hover { background: rgba(255,55,55,0.14); }
+                QPushButton:hover { background: rgba(255,55,55,0.18); border: 1px solid rgba(255,55,55,0.45); }
             """
-            icon_color = "rgba(255,90,90,0.82)"
-            label_color = "rgba(255,255,255,0.45)"
+            icon_color = "#ff5555"
+            label_color = "rgba(255,255,255,0.60)"
+        elif cmd == "point":
+            style = """
+                QPushButton {
+                    background: rgba(0,230,118,0.10);
+                    border: 1px solid rgba(0,230,118,0.28);
+                    border-radius: 8px;
+                }
+                QPushButton:hover { background: rgba(0,230,118,0.22); border: 1px solid rgba(0,230,118,0.55); }
+            """
+            icon_color = "#00e676"
+            label_color = "rgba(255,255,255,0.70)"
+        elif cmd == "ocr":
+            style = """
+                QPushButton {
+                    background: rgba(255,183,77,0.10);
+                    border: 1px solid rgba(255,183,77,0.28);
+                    border-radius: 8px;
+                }
+                QPushButton:hover { background: rgba(255,183,77,0.22); border: 1px solid rgba(255,183,77,0.55); }
+            """
+            icon_color = "#ffb74d"
+            label_color = "rgba(255,255,255,0.70)"
+        elif cmd == "diagram":
+            style = """
+                QPushButton {
+                    background: rgba(38,198,218,0.10);
+                    border: 1px solid rgba(38,198,218,0.28);
+                    border-radius: 8px;
+                }
+                QPushButton:hover { background: rgba(38,198,218,0.22); border: 1px solid rgba(38,198,218,0.55); }
+            """
+            icon_color = "#26c6da"
+            label_color = "rgba(255,255,255,0.70)"
+        elif cmd == "screen":
+            style = """
+                QPushButton {
+                    background: rgba(66,165,245,0.10);
+                    border: 1px solid rgba(66,165,245,0.28);
+                    border-radius: 8px;
+                }
+                QPushButton:hover { background: rgba(66,165,245,0.22); border: 1px solid rgba(66,165,245,0.55); }
+            """
+            icon_color = "#42a5f5"
+            label_color = "rgba(255,255,255,0.70)"
+        elif cmd == "memory":
+            style = """
+                QPushButton {
+                    background: rgba(171,71,188,0.10);
+                    border: 1px solid rgba(171,71,188,0.28);
+                    border-radius: 8px;
+                }
+                QPushButton:hover { background: rgba(171,71,188,0.22); border: 1px solid rgba(171,71,188,0.55); }
+            """
+            icon_color = "#ab47bc"
+            label_color = "rgba(255,255,255,0.70)"
         elif cmd == "obsidian":
             style = """
                 QPushButton {
-                    background: rgba(100,70,200,0.07);
-                    border: 1px solid rgba(100,70,200,0.18);
+                    background: rgba(138,90,250,0.10);
+                    border: 1px solid rgba(138,90,250,0.24);
                     border-radius: 8px;
                 }
-                QPushButton:hover { background: rgba(100,70,200,0.16); }
+                QPushButton:hover { background: rgba(138,90,250,0.22); border: 1px solid rgba(138,90,250,0.50); }
             """
-            icon_color = "rgba(148,110,240,0.85)"
-            label_color = "rgba(255,255,255,0.42)"
+            icon_color = "#b388ff"
+            label_color = "rgba(255,255,255,0.65)"
+        elif cmd == "hana":
+            style = """
+                QPushButton {
+                    background: rgba(255,105,180,0.10);
+                    border: 1px solid rgba(255,105,180,0.25);
+                    border-radius: 8px;
+                }
+                QPushButton:hover { background: rgba(255,105,180,0.22); border: 1px solid rgba(255,105,180,0.50); }
+            """
+            icon_color = "#ff69b4"
+            label_color = "rgba(255,255,255,0.65)"
+        elif cmd == "centinela":
+            style = """
+                QPushButton {
+                    background: rgba(0,215,120,0.10);
+                    border: 1px solid rgba(0,215,120,0.25);
+                    border-radius: 8px;
+                }
+                QPushButton:hover { background: rgba(0,215,120,0.22); border: 1px solid rgba(0,215,120,0.50); }
+            """
+            icon_color = "#00d578"
+            label_color = "rgba(255,255,255,0.65)"
+        elif cmd == "blender":
+            style = """
+                QPushButton {
+                    background: rgba(234,118,0,0.10);
+                    border: 1px solid rgba(234,118,0,0.25);
+                    border-radius: 8px;
+                }
+                QPushButton:hover { background: rgba(234,118,0,0.22); border: 1px solid rgba(234,118,0,0.50); }
+            """
+            icon_color = "#ea7600"
+            label_color = "rgba(255,255,255,0.65)"
+        elif cmd == "proyectos":
+            style = """
+                QPushButton {
+                    background: rgba(60,140,255,0.10);
+                    border: 1px solid rgba(60,140,255,0.25);
+                    border-radius: 8px;
+                }
+                QPushButton:hover { background: rgba(60,140,255,0.22); border: 1px solid rgba(60,140,255,0.50); }
+            """
+            icon_color = "#4fa3ff"
+            label_color = "rgba(255,255,255,0.65)"
+        elif cmd == "vision":
+            style = f"""
+                QPushButton {{
+                    background: rgba(0,229,255,0.14);
+                    border: 1px solid rgba(0,229,255,0.40);
+                    border-radius: 8px;
+                }}
+                QPushButton:hover {{ background: rgba(0,229,255,0.26); border: 1px solid rgba(0,229,255,0.75); }}
+            """
+            icon_color = "#00e5ff"
+            label_color = "#00e5ff"
+        elif cmd == "track":
+            style = """
+                QPushButton {
+                    background: rgba(0,229,255,0.08);
+                    border: 1px solid rgba(0,229,255,0.25);
+                    border-radius: 8px;
+                }
+                QPushButton:hover { background: rgba(0,229,255,0.18); border: 1px solid rgba(0,229,255,0.50); }
+            """
+            icon_color = "#00e5ff"
+            label_color = "rgba(255,255,255,0.65)"
         else:
             style = """
                 QPushButton {
@@ -629,19 +851,19 @@ class FloatingPanel(QWidget):
                     border: 1px solid rgba(0,229,255,0.18);
                 }
             """
-            icon_color = "rgba(160,190,255,0.62)"
-            label_color = "rgba(255,255,255,0.42)"
+            icon_color = "rgba(160,190,255,0.65)"
+            label_color = "rgba(255,255,255,0.48)"
 
         btn.setStyleSheet(style)
 
         inner = QVBoxLayout(btn)
-        inner.setContentsMargins(0, 8, 0, 6)
-        inner.setSpacing(3)
+        inner.setContentsMargins(0, 4, 0, 4)
+        inner.setSpacing(2)
         inner.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         ic = QLabel(icon)
         ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ic.setStyleSheet(f"color: {icon_color}; font: 600 14px 'Inter'; background: transparent; border: none;")
+        ic.setStyleSheet(f"color: {icon_color}; font: 600 13px 'Inter'; background: transparent; border: none;")
 
         lb = QLabel(label)
         lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -664,16 +886,24 @@ class FloatingPanel(QWidget):
             return
 
         mapping = {
-            "wake":     "despierta la cámara",
-            "track":    "sígueme",
-            "stop":     "para de seguirme",
-            "snap":     "captura de pantalla",
-            "mute":     "silencia",
-            "vol_up":   "sube el volumen",
-            "vol_dn":   "baja el volumen",
-            "config":   "abrir configuración",
-            "obsidian": "abre obsidian",
-            "help":     "pregúntale a ollama ¿cómo usar NOVA?",
+            "vision":    "describe la escena",
+            "point":     "qué estoy señalando",
+            "ocr":       "lee este documento",
+            "diagram":   "digitaliza este diagrama",
+            "screen":    "inspecciona la pantalla",
+            "memory":    "resumen de hoy",
+            "obsidian":  "abre obsidian",
+            "proyectos": "abre proyectos",
+            "blender":   "abre blender",
+            "hana":      "dictados de hana",
+            "centinela": "estado del equipo",
+            "snap":      "captura de pantalla",
+            "mute":      "silencia",
+            "wake":      "despierta la cámara",
+            "stop":      "para la cámara",
+            "track":     "trackear",
+            "vol_up":    "sube el volumen",
+            "vol_dn":    "baja el volumen",
         }
         voice_cmd = mapping.get(cmd, cmd)
         if not self.dispatcher:
@@ -718,17 +948,25 @@ class FloatingPanel(QWidget):
     def update_video_frame(self, frame_bgr):
         """Recibe un frame BGR de OpenCV (numpy array) y lo pinta en la UI."""
         if frame_bgr is None:
+            if not getattr(self, "_camera_suspended_state", False):
+                self._camera_suspended_state = True
+                self.video_label.clear()
+                self.video_label.setText("🌙 CÁMARA SUSPENDIDA\n(Toca 'Despertar' para activar)")
+                self.video_label.setStyleSheet("background: #070d1e; border-radius: 8px; color: rgba(0, 229, 255, 0.45); font: 600 11px 'JetBrains Mono'; qproperty-alignment: AlignCenter;")
             return
+
+        if getattr(self, "_camera_suspended_state", False):
+            self._camera_suspended_state = False
+            self.video_label.setText("")
+            self.video_label.setStyleSheet("background: #0d162e; border-radius: 8px;")
+
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb.shape
-        img = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
-        pix = QPixmap.fromImage(img).scaled(
-            316, 178,
-            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        # Actualizar en el hilo principal de UI
-        QMetaObject.invokeMethod(self.video_label, "setPixmap", Qt.ConnectionType.QueuedConnection, Q_ARG(QPixmap, pix))
+        bytes_per_line = ch * w
+        # Copiar el búfer para desvincularlo de OpenCV y asegurar pertenencia en Qt
+        img = QImage(rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888).copy()
+        pix = QPixmap.fromImage(img)
+        self.video_label.setPixmap(pix)
 
     # ── Estilo QSS ────────────────────────────────────────────────────────
     def _stylesheet(self) -> str:
@@ -747,13 +985,16 @@ class FloatingPanel(QWidget):
                   screen.bottom() - self.height() - 12)
 
     def _anim_in(self):
-        self.setWindowOpacity(0)
-        anim = QPropertyAnimation(self, b"windowOpacity", self)
-        anim.setDuration(220)
-        anim.setStartValue(0.0)
-        anim.setEndValue(1.0)
-        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        anim.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
+        if sys.platform == "win32":
+            self.setWindowOpacity(0)
+            anim = QPropertyAnimation(self, b"windowOpacity", self)
+            anim.setDuration(220)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            anim.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
+        else:
+            self.setWindowOpacity(1.0)
 
     # ── Arrastrar sin bordes ──────────────────────────────────────────────
     def mousePressEvent(self, event):
@@ -768,11 +1009,28 @@ class FloatingPanel(QWidget):
         self._drag_pos = None
 
     def closeEvent(self, event):
+        try:
+            bridge = get_ui_bridge()
+            bridge.frame_signal.disconnect(self.update_video_frame)
+            bridge.status_signal.disconnect(self.update_status)
+            bridge.camera_state_signal.disconnect(self.set_camera_state)
+        except Exception:
+            pass
+        if self.dispatcher and hasattr(self.dispatcher, 'camera') and self.dispatcher.camera:
+            try:
+                if self.dispatcher.camera.is_running:
+                    self.dispatcher.camera.stop()
+            except Exception:
+                pass
         super().closeEvent(event)
         global _panel_instance
         with _panel_lock:
             if _panel_instance is self:
                 _panel_instance = None
+        # Salir de la aplicación para liberar la cámara y procesador de inmediato
+        app = QApplication.instance()
+        if app:
+            app.quit()
 
 
 # ─── Overlay de Escucha (Pill Widget) ─────────────────────────────────────────
@@ -783,11 +1041,10 @@ class ListeningOverlay(QWidget):
     """
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
-        )
+        flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
+        if sys.platform == "win32":
+            flags |= Qt.WindowType.Tool
+        self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedSize(240, 56)
 
@@ -856,11 +1113,10 @@ class ListeningOverlay(QWidget):
 class ToastNotification(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
-        )
+        flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
+        if sys.platform == "win32":
+            flags |= Qt.WindowType.Tool
+        self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(300)
 
@@ -933,17 +1189,63 @@ class ToastNotification(QWidget):
         self._hide_timer.start(duration_ms)
 
 
-# ─── API pública ──────────────────────────────────────────────────────────────
+# ─── API pública y Puente de Eventos entre Hilos de Qt ──────────────────────────
+class NovaUIBridge(QObject):
+    frame_signal = pyqtSignal(object)
+    status_signal = pyqtSignal(str, float)
+    audio_level_signal = pyqtSignal(float)
+    toast_signal = pyqtSignal(str, str, bool)
+    show_listening_signal = pyqtSignal(int)
+    hide_listening_signal = pyqtSignal()
+    camera_state_signal = pyqtSignal(bool)
+
+_ui_bridge: NovaUIBridge | None = None
+
+def get_ui_bridge() -> NovaUIBridge:
+    global _ui_bridge
+    if _ui_bridge is None:
+        _ui_bridge = NovaUIBridge()
+    return _ui_bridge
+
 _panel_instance: FloatingPanel | None = None
 _toast_instance: ToastNotification | None = None
 _listening_instance: ListeningOverlay | None = None
-# Protege _panel_instance: se escribe desde el hilo de Qt (launch_panel/
-# closeEvent) y se lee desde el hilo de visión de main.py (vía
-# update_video_frame_safe más abajo).
 _panel_lock = threading.Lock()
+
+def _handle_toast_event(title: str, body: str, success: bool):
+    global _toast_instance
+    if _toast_instance is None:
+        _toast_instance = ToastNotification()
+    _toast_instance.show_message(title, body, success=success)
+
+def _handle_show_listening(timeout_ms: int):
+    global _listening_instance
+    if _listening_instance is None:
+        _listening_instance = ListeningOverlay()
+    _listening_instance.show_listening(timeout_ms)
+
+def _handle_hide_listening():
+    global _listening_instance
+    if _listening_instance is not None:
+        _listening_instance.hide_listening()
+
+def _handle_audio_level(level: float):
+    global _panel_instance
+    with _panel_lock:
+        panel = _panel_instance
+    if panel is not None and hasattr(panel, 'wave'):
+        panel.wave.set_level(level)
 
 def launch_panel(dispatcher=None) -> FloatingPanel:
     global _panel_instance
+    bridge = get_ui_bridge()
+    if not getattr(bridge, "_signals_connected", False):
+        bridge._signals_connected = True
+        bridge.toast_signal.connect(_handle_toast_event)
+        bridge.show_listening_signal.connect(_handle_show_listening)
+        bridge.hide_listening_signal.connect(_handle_hide_listening)
+        bridge.audio_level_signal.connect(_handle_audio_level)
+
     with _panel_lock:
         if _panel_instance and not _panel_instance.isHidden():
             _panel_instance.raise_()
@@ -954,74 +1256,28 @@ def launch_panel(dispatcher=None) -> FloatingPanel:
         return _panel_instance
 
 def update_video_frame_safe(frame_bgr):
-    """Punto de entrada seguro para hilos que no son el de Qt (ej. el hilo de
-    visión en main.py) para actualizar el video del panel.
-
-    Antes, ese hilo llamaba directamente a `_panel_instance.isHidden()` y
-    `.update_video_frame()` fuera del hilo de Qt — una violación de las
-    reglas de thread-affinity de Qt (comportamiento indefinido, no solo el
-    `RuntimeError` de objeto-ya-destruido que sí se capturaba). Aquí solo se
-    lee la referencia bajo lock; la llamada real a métodos de Qt se agenda
-    en el hilo de Qt vía QTimer.singleShot, igual que show_toast/show_listening.
-    """
-    with _panel_lock:
-        panel = _panel_instance
-    if panel is None:
-        return
-
-    def _do():
-        try:
-            if not panel.isHidden():
-                panel.update_video_frame(frame_bgr)
-        except RuntimeError:
-            # El panel se cerró (objeto Qt destruido) justo entre la lectura
-            # de la referencia y su uso ya dentro del hilo de Qt.
-            pass
-    QTimer.singleShot(0, QApplication.instance(), _do)
+    """Punto de entrada seguro para hilos secundarios para emitir frames al GUI thread."""
+    get_ui_bridge().frame_signal.emit(frame_bgr)
 
 def update_status_safe(tracking: str, zoom: float):
-    """Punto de entrada seguro para hilos para actualizar la barra de estado/chips HUD."""
-    with _panel_lock:
-        panel = _panel_instance
-    if panel is None:
-        return
-
-    def _do():
-        try:
-            if not panel.isHidden():
-                panel.update_status(tracking, zoom)
-        except RuntimeError:
-            pass
-    QTimer.singleShot(0, QApplication.instance(), _do)
+    """Punto de entrada seguro para hilos secundarios para actualizar chips HUD."""
+    get_ui_bridge().status_signal.emit(tracking, zoom)
 
 def show_toast(title: str, body: str, success: bool = True):
-    def _do():
-        global _toast_instance
-        if _toast_instance is None:
-            _toast_instance = ToastNotification()
-        _toast_instance.show_message(title, body, success=success)
-    QTimer.singleShot(0, QApplication.instance(), _do)
+    get_ui_bridge().toast_signal.emit(title, body, success)
 
 def show_listening(timeout_ms: int = 5000):
-    def _do():
-        global _listening_instance
-        if _listening_instance is None:
-            _listening_instance = ListeningOverlay()
-        _listening_instance.show_listening(timeout_ms)
-    QTimer.singleShot(0, QApplication.instance(), _do)
+    get_ui_bridge().show_listening_signal.emit(timeout_ms)
 
 def hide_listening():
-    def _do():
-        global _listening_instance
-        if _listening_instance is not None:
-            _listening_instance.hide_listening()
-    QTimer.singleShot(0, QApplication.instance(), _do)
+    get_ui_bridge().hide_listening_signal.emit()
 
 def update_audio_level_safe(level: float):
-    def _do():
-        if _panel_instance is not None and hasattr(_panel_instance, 'wave'):
-            _panel_instance.wave.set_level(level)
-    QTimer.singleShot(0, QApplication.instance(), _do)
+    get_ui_bridge().audio_level_signal.emit(level)
+
+def update_camera_state_safe(is_running: bool):
+    """Punto de entrada seguro para emitir el estado ON/OFF del hardware de la cámara."""
+    get_ui_bridge().camera_state_signal.emit(is_running)
 
 
 # ─── Test standalone ──────────────────────────────────────────────────────────

@@ -1,17 +1,14 @@
-# Mapa gesto -> comando. El texto de la derecha se procesa exactamente igual
-# que si lo hubieras dicho por voz (pasa por CommandDispatcher.process_command),
-# así que puedes usar cualquier frase que ya funcione por voz, incluyendo
-# comandos libres que interpretará el clasificador de intención.
+# Mapa de gestos de NOVA adaptado para workstation Linux (HP Pavilion)
+# Cada gesto ejecuta la orden asociada, con respuesta de voz y visual inmediata.
 gestures:
-  palma_abierta: "sígueme"
-  puno: "para de seguirme"
-  pellizco: "acércate"
-  victoria: "captura de pantalla"
-  apuntar: "toma una foto"
-  pulgar_arriba: "resetea la cámara"
+  victoria: "abre obsidian"
+  pulgar_arriba: "abre proyectos"
+  tres_dedos: "abre blender"
+  ok: "dictados de hana"
+  palma_abierta: "describe la escena"
+  mano_l: "estado del equipo"
+  apuntar: "captura de pantalla"
+  puno: "para la cámara"
+  cuatro_dedos: "despierta la cámara"
   pulgar_abajo: "silencia"
-  ok: "modo presentación"
-  tres_dedos: "modo trabajo"
   rock: "sube el volumen"
-  mano_l: "siguiente ventana"
-  cuatro_dedos: "modo descanso"

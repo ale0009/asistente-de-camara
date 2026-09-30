@@ -18,11 +18,14 @@ Flujo:
   6. NOVA responde hablando via edge-tts (TTS offline usando MS Edge voices).
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
 import queue
 import struct
+import subprocess
 import tempfile
 import threading
 import time
@@ -30,18 +33,72 @@ import wave
 
 import edge_tts
 import numpy as np
-import pyaudio
 import pygame
 import webrtcvad
-import whisper
 from openwakeword.model import Model as WakeWordModel
 
+try:
+    import pyaudio
+    HAS_PYAUDIO = True
+    FORMAT = pyaudio.paInt16
+except ImportError:
+    HAS_PYAUDIO = False
+    pyaudio = None
+    FORMAT = 2
+
+try:
+    import sounddevice as sd
+    HAS_SOUNDDEVICE = True
+except ImportError:
+    HAS_SOUNDDEVICE = False
+    sd = None
+
+try:
+    import whisper
+    HAS_WHISPER = True
+except ImportError:
+    HAS_WHISPER = False
+    whisper = None
+
 logger = logging.getLogger(__name__)
+
+class SoundDeviceStreamAdapter:
+    def __init__(self, sample_rate, channels, mic_index, chunk):
+        self.sample_rate = sample_rate
+        self.channels = channels
+        self.mic_index = mic_index
+        self.chunk = chunk
+        self.stream = sd.RawInputStream(
+            samplerate=sample_rate,
+            channels=channels,
+            dtype='int16',
+            device=mic_index,
+            blocksize=chunk
+        )
+        self.stream.start()
+
+    def start_stream(self):
+        if not self.stream.active:
+            self.stream.start()
+
+    def stop_stream(self):
+        if self.stream.active:
+            self.stream.stop()
+
+    def read(self, num_frames, exception_on_overflow=False):
+        data, _ = self.stream.read(num_frames)
+        return bytes(data)
+
+    def close(self):
+        try:
+            self.stream.stop()
+            self.stream.close()
+        except Exception:
+            pass
 
 # ─── Constantes de audio ───────────────────────────────────────────────────────
 SAMPLE_RATE = 16000          # Hz requerido por openWakeWord y Whisper
 CHANNELS    = 1              # Mono
-FORMAT      = pyaudio.paInt16
 OWW_CHUNK   = 1280           # muestras por frame (openWakeWord lo requiere)
 VAD_FRAME_MS = 30            # ms por frame para webrtcvad (10, 20 o 30)
 VAD_FRAME_SAMPLES = int(SAMPLE_RATE * VAD_FRAME_MS / 1000)  # 480 muestras
@@ -94,9 +151,17 @@ class VoiceEngine:
     def initialize_models(self):
         """Carga Whisper y openWakeWord. Llamar antes de start_listening()."""
         # 1. Whisper STT
-        logger.info("Cargando modelo Whisper '%s'...", self.stt_model_size)
-        self.stt_model = whisper.load_model(self.stt_model_size)
-        logger.info("Whisper listo.")
+        if HAS_WHISPER:
+            try:
+                logger.info("Cargando modelo Whisper '%s'...", self.stt_model_size)
+                self.stt_model = whisper.load_model(self.stt_model_size)
+                logger.info("Whisper listo.")
+            except Exception as e:
+                logger.warning("Fallo al cargar whisper nativo: %s. Se usará motor voz-local.", e)
+                self.stt_model = None
+        else:
+            logger.info("whisper nativo no presente; se usará motor voz-local (GPU int8 / faster-whisper).")
+            self.stt_model = None
 
         # 2. openWakeWord — verificar si existe assets/nova.onnx custom o usar el fallback
         custom_onnx = os.path.abspath("assets/nova.onnx")
@@ -120,8 +185,15 @@ class VoiceEngine:
             logger.warning("El Wake Word quedará desactivado. "
                            "NOVA aún funciona con los botones del panel.")
 
-        # 3. PyAudio
-        self.pa = pyaudio.PyAudio()
+        # 3. Backend de Audio (PyAudio o sounddevice)
+        if HAS_PYAUDIO:
+            try:
+                self.pa = pyaudio.PyAudio()
+            except Exception as exc:
+                logger.warning("PyAudio falló al iniciar: %s. Se usará sounddevice.", exc)
+                self.pa = None
+        else:
+            self.pa = None
 
         # Callbacks para la UI
         self.on_wake_word_detected = None
@@ -133,8 +205,8 @@ class VoiceEngine:
     # Escucha en segundo plano
     # ──────────────────────────────────────────────────────────────────────────
     def start_listening(self):
-        if not self.pa:
-            logger.error("Llama a initialize_models() antes de start_listening().")
+        if not self.pa and not HAS_SOUNDDEVICE:
+            logger.error("No hay backend de audio disponible (ni PyAudio ni sounddevice).")
             return
 
         self.is_running = True
@@ -151,19 +223,24 @@ class VoiceEngine:
         self._tts_worker.start()
         logger.info("Worker de TTS iniciado.")
 
-    def _open_stream(self) -> pyaudio.Stream:
+    def _open_stream(self):
         mic_index = self.config.get("mic_index", None)
         if mic_index is not None:
             logger.info("Usando micrófono específico (índice %s)", mic_index)
             
-        return self.pa.open(
-            rate=SAMPLE_RATE,
-            channels=CHANNELS,
-            format=FORMAT,
-            input=True,
-            input_device_index=mic_index,
-            frames_per_buffer=OWW_CHUNK,
-        )
+        if self.pa:
+            return self.pa.open(
+                rate=SAMPLE_RATE,
+                channels=CHANNELS,
+                format=FORMAT,
+                input=True,
+                input_device_index=mic_index,
+                frames_per_buffer=OWW_CHUNK,
+            )
+        elif HAS_SOUNDDEVICE:
+            return SoundDeviceStreamAdapter(SAMPLE_RATE, CHANNELS, mic_index, OWW_CHUNK)
+        else:
+            raise RuntimeError("No se encontró backend de audio para captura")
 
     def _listen_loop(self):
         """Bucle principal: detecta wake word → graba comando → procesa con Whisper."""
@@ -244,7 +321,7 @@ class VoiceEngine:
     # ──────────────────────────────────────────────────────────────────────────
     # Grabación con VAD + Whisper STT
     # ──────────────────────────────────────────────────────────────────────────
-    def _record_and_transcribe(self, stream: pyaudio.Stream) -> str:
+    def _record_and_transcribe(self, stream) -> str:
         """
         Graba frames de audio usando VAD (webrtcvad) hasta detectar silencio,
         luego transcribe con Whisper y devuelve el texto.
@@ -295,29 +372,44 @@ class VoiceEngine:
             tmp_path = tmp.name
             with wave.open(tmp_path, "wb") as wf:
                 wf.setnchannels(CHANNELS)
-                wf.setsampwidth(self.pa.get_sample_size(FORMAT))
+                sampwidth = self.pa.get_sample_size(FORMAT) if self.pa else 2
+                wf.setsampwidth(sampwidth)
                 wf.setframerate(SAMPLE_RATE)
                 wf.writeframes(audio_bytes)
 
-        # Transcripción con Whisper
+        # Transcripción con Whisper o voz-local
         try:
-            logger.info("Transcribiendo con Whisper...")
-            result = self.stt_model.transcribe(
-                tmp_path,
-                language=self.language,
-                fp16=False,
-            )
-            text = result.get("text", "").strip()
-            logger.info("Whisper dijo: '%s'", text)
+            if self.stt_model:
+                logger.info("Transcribiendo con openai-whisper nativo...")
+                result = self.stt_model.transcribe(
+                    tmp_path,
+                    language=self.language,
+                    fp16=False,
+                )
+                text = result.get("text", "").strip()
+            else:
+                logger.info("Transcribiendo con voz-local (GPU int8)...")
+                voz_local_dir = os.path.expanduser("~/Datos/Projects/voz-local")
+                cmd = ["uv", "run", "--directory", voz_local_dir, "python", "voz.py", "transcribir", tmp_path]
+                res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                if res.returncode == 0:
+                    text = res.stdout.strip()
+                else:
+                    logger.error("Error en voz-local: %s", res.stderr)
+                    text = ""
+            logger.info("Transcripción obtenida: '%s'", text)
             return text
         except Exception as exc:
-            logger.error("Error en Whisper: %s", exc)
+            logger.error("Error en Whisper/transcripción: %s", exc)
             return ""
         finally:
-            os.unlink(tmp_path)
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     # ──────────────────────────────────────────────────────────────────────────
-    # TTS con edge-tts (sin internet — usa los motores de Windows)
+    # TTS con edge-tts (con fallback local a Kokoro/Piper via 'hablar')
     # ──────────────────────────────────────────────────────────────────────────
     def speak(self, text: str):
         """Agrega el texto a la cola de reproducción de voz."""
@@ -353,12 +445,6 @@ class VoiceEngine:
         try:
             asyncio.run(_generate(tmp_path))
 
-            # Reproducir con pygame.mixer y esperar de verdad a que termine
-            # (antes se usaba os.startfile + un sleep fijo de 3s, que abría el
-            # reproductor de Windows y cortaba el audio si tardaba o duraba más).
-            # pygame.mixer debe inicializarse en este mismo hilo (cada llamada
-            # a speak() corre en un hilo nuevo) — inicializarlo una sola vez en
-            # el hilo principal causaba "mixer not initialized" al reproducir.
             if not pygame.mixer.get_init():
                 pygame.mixer.init()
             pygame.mixer.music.load(tmp_path)
@@ -367,7 +453,11 @@ class VoiceEngine:
                 time.sleep(0.1)
             pygame.mixer.music.unload()
         except Exception as exc:
-            logger.error("Error en edge-tts/reproducción: %s", exc)
+            logger.warning("Fallo en edge-tts (%s), usando fallback local neuronal 'hablar'...", exc)
+            try:
+                subprocess.run(["hablar", text], check=False)
+            except Exception as e2:
+                logger.error("Error en fallback 'hablar': %s", e2)
         finally:
             try:
                 os.unlink(tmp_path)
@@ -377,19 +467,25 @@ class VoiceEngine:
     def get_input_devices(self) -> dict:
         """Devuelve un diccionario de {index: name} de los micrófonos disponibles."""
         devices = {}
-        pa_temp = self.pa if self.pa else pyaudio.PyAudio()
-        try:
-            info = pa_temp.get_host_api_info_by_index(0)
-            numdevices = info.get('deviceCount', 0)
-            for i in range(0, numdevices):
-                device_info = pa_temp.get_device_info_by_host_api_device_index(0, i)
-                if device_info.get('maxInputChannels', 0) > 0:
-                    devices[i] = device_info.get('name')
-        except Exception as e:
-            logger.error(f"Error listando micrófonos en VoiceEngine: {e}")
-        finally:
-            if not self.pa:
-                pa_temp.terminate()
+        if self.pa:
+            pa_temp = self.pa
+            try:
+                info = pa_temp.get_host_api_info_by_index(0)
+                numdevices = info.get('deviceCount', 0)
+                for i in range(0, numdevices):
+                    device_info = pa_temp.get_device_info_by_host_api_device_index(0, i)
+                    if device_info.get('maxInputChannels', 0) > 0:
+                        devices[i] = device_info.get('name')
+            except Exception as e:
+                logger.error(f"Error listando micrófonos en VoiceEngine: {e}")
+        elif HAS_SOUNDDEVICE:
+            try:
+                devs = sd.query_devices()
+                for i, d in enumerate(devs):
+                    if d.get('max_input_channels', 0) > 0:
+                        devices[i] = d.get('name', f"Dispositivo {i}")
+            except Exception as e:
+                logger.error(f"Error listando micrófonos con sounddevice: {e}")
         return devices
 
     def set_microphone(self, index: int) -> bool:
@@ -434,32 +530,30 @@ class VoiceEngine:
     # ──────────────────────────────────────────────────────────────────────────
     def stop(self):
         self.is_running = False
+
+        # Desbloquear y cerrar el stream de micrófono de inmediato
+        try:
+            if self.stream:
+                self.stream.stop_stream()
+                self.stream.close()
+                self.stream = None
+        except Exception:
+            pass
+
         # Detener worker de TTS enviando señal de parada
         if self.tts_queue:
             self.tts_queue.put(None)
             if self._tts_worker and self._tts_worker.is_alive():
-                self._tts_worker.join(timeout=2)
+                self._tts_worker.join(timeout=1.0)
 
         if self._listen_thread and self._listen_thread.is_alive():
-            self._listen_thread.join(timeout=2)
+            self._listen_thread.join(timeout=1.5)
 
-            if self._listen_thread.is_alive():
-                # Seguía bloqueado en stream.read(); se intenta desbloquear
-                # directamente en vez de llamar pa.terminate() con el hilo
-                # todavía vivo (antes esto podía tocar una instancia de
-                # PyAudio ya terminada y crashear al cerrar NOVA).
-                logger.warning("El hilo de escucha no terminó a tiempo; intentando desbloquear el stream.")
-                try:
-                    if self.stream:
-                        self.stream.stop_stream()
-                except Exception:
-                    pass
-                self._listen_thread.join(timeout=2)
-
-        if self._listen_thread and self._listen_thread.is_alive():
-            logger.warning("El hilo de escucha sigue vivo; se omite pa.terminate() para evitar un crash.")
-        elif self.pa:
-            self.pa.terminate()
+        if self.pa:
+            try:
+                self.pa.terminate()
+            except Exception:
+                pass
 
         logger.info("Motor de voz detenido.")
 

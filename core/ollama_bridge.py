@@ -213,13 +213,14 @@ class OllamaBridge:
             logger.error(f"Error de red consultando a Ollama en stream: {e}")
             yield "No me pude conectar con el servidor local de Ollama."
 
-    def query_vision(self, prompt: str, image_input, model: str = "moondream", max_tokens: int = 150) -> str:
+    def query_vision(self, prompt: str, image_input, model: str = None, max_tokens: int = 350) -> str:
         """
         Envía una imagen (frame BGR de OpenCV, bytes JPEG o string Base64) junto a un prompt
-        al modelo multimodal de Ollama (ej. 'moondream') y devuelve la descripción en texto.
+        al modelo multimodal de Ollama (ej. 'qwen3-vl:2b' o 'moondream') y devuelve la descripción en texto.
         """
         import base64
         
+        model = model or self.vision_model
         url = f"{self.host}/api/generate"
         b64_str = ""
 
@@ -258,6 +259,11 @@ class OllamaBridge:
             if response.status_code == 200:
                 data = response.json()
                 reply = data.get("response", "").strip()
+                if not reply and data.get("thinking"):
+                    # Si la respuesta se quedó al límite del thinking, extraer la conclusión
+                    lines = [ln.strip() for ln in data.get("thinking", "").split("\n") if ln.strip()]
+                    if lines:
+                        reply = lines[-1]
                 logger.info(f"Respuesta de visión recibida ({len(reply)} chars)")
                 return reply
             elif response.status_code == 404:

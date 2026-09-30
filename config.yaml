@@ -1,91 +1,52 @@
-# Configuración General de NOVA
-
-general:
-  name: "NOVA"
-  language: "es"
-  theme: "dark"
-  start_with_windows: true
-  start_obsbot_center: true
-  obsbot_path: "D:\\OBSBOT Center\\bin\\OBSBOT_Main.exe"
-
-camera:
-  # El índice de la cámara. 
-  # 0 suele ser tu cámara web principal (OBSBOT).
-  # 1 o 2 suele ser la Cámara Virtual u otras cámaras (como tu celular).
-  camera_index: 0
-  
-  device_name: "OBSBOT Tiny 3 Lite"
-  osc_host: "127.0.0.1"
-  osc_port: 16284
-  resolution: "640x360"
-  tracking_speed: "Standard"
-
-voice:
-  # ─── Wake Word (openWakeWord — 100% local, sin API key) ───────────────────
-  # Modelos disponibles preinstalados: hey_jarvis, alexa, hey_mycroft, etc.
-  # Para entrenar "hey_nova" gratis: https://openWakeWord.com
-  # Si entrenas uno propio, coloca el .onnx en assets/ y pon la ruta aquí.
-  wake_word_models:
-    - "hey_jarvis"   # Modelo descargado localmente — 100% offline, sin API key
-    # Alternativas disponibles offline: alexa, hey_mycroft, hey_rhasspy, timer, weather
-    # Para un wake word personalizado "hey_nova" entrenar gratis en: https://openWakeWord.com
-  wake_threshold: 0.5       # Sensibilidad (0.0 a 1.0)
-  silence_limit_sec: 1.5    # Segundos de silencio para cortar el comando
-
-  # ─── Dispositivo de entrada de Audio ──────────────────────────────────────
-  # Deja mic_index en null para que NOVA use automáticamente el micrófono
-  # que tengas configurado como predeterminado en Windows (OBSBOT o tus audífonos).
-  mic_index: 1
-
-
-  # ─── STT: Whisper local ───────────────────────────────────────────────────
-  # Modelos disponibles: tiny, base, small, medium, large
-  # ("small" es el mejor balance tamaño/precisión para español)
-  stt_model: "small"
-  stt_language: "es"
-
-  # ─── TTS: edge-tts (voces de Microsoft, sin internet) ────────────────────
-  tts_voice: "es-CO-SalomeNeural"
-  tts_rate: "+0%"
-  tts_volume: "+0%"
-
-gestures:
-  enabled: true
-  sensitivity: "medium"
-  activation_time: 0.8
-
-obsidian:
-  vault_path: "D:\\Documentos\\Obsidian Vault"
-  nova_folder: "NOVA"
-  log_voice_commands: true
-  log_gestures: false
-  create_daily_note: true
-
 assistant:
-  # Carpetas donde el asistente puede buscar archivos o escribir notas cuando
-  # le pides algo libre ("busca X", "anota Y"). Solo tú decides qué agregar
-  # aquí — nunca opera fuera de esta lista (nada de C:\Windows, Program Files, etc.).
   allowed_folders:
-    - "C:\\Users\\mario\\Documents"
-    - "C:\\Users\\mario\\Desktop"
-    - "D:\\Documentos\\Obsidian Vault"
-  # Subcarpeta del vault de Obsidian donde se guardan las notas libres
-  # (distinto del log automático de sesión en obsidian.nova_folder/Sesiones).
-  notes_folder: "NOVA/Notas"
-
+  - /home/alejandro/Datos/Vault-Obsidian
+  - /home/alejandro/Datos/Projects
+  - /home/alejandro/Documentos
+  - /home/alejandro/Escritorio
+  notes_folder: NOVA/Notas
+camera:
+  camera_index: 0
+  device_name: HP Wide Vision
+  osc_host: 127.0.0.1
+  osc_port: 16284
+  resolution: 640x360
+  tracking_speed: Standard
+general:
+  language: es
+  name: NOVA
+  obsbot_path: ''
+  start_obsbot_center: false
+  start_with_windows: false
+  theme: dark
+gestures:
+  activation_time: 0.8
+  enabled: true
+  sensitivity: medium
 llm:
-  # ─── Modelos de Inferencia Local (Ollama) ──────────────────────────────
-  # Modelos recomendados:
-  # - "qwen3:8b" (Máxima precisión en español y razonamiento agéntico)
-  # - "qwen3:4b" (Tiempo real ultra-rápido, <200ms latencia a primer token)
-  # - "hermes3:8b" (Optimizado para tool calling / function calling)
-  # - "llama3.2:3b" (Ultra ligero)
-  model: "qwen3:8b"
-  vision_model: "moondream"
   fallback_models:
-    - "qwen3:4b"
-    - "hermes3:8b"
-    - "llama3.2:3b"
+  - qwen3:1.7b
+  - qwen2.5-coder:1.5b
+  - qwen3:4b
+  max_tokens: 220
+  model: granite4:tiny-h
   stream_sentences: true
   temperature: 0.2
-  max_tokens: 220
+  vision_model: qwen3-vl:2b
+obsidian:
+  create_daily_note: true
+  log_gestures: false
+  log_voice_commands: true
+  nova_folder: NOVA
+  vault_path: /home/alejandro/Datos/Vault-Obsidian
+voice:
+  mic_index: 8
+  silence_limit_sec: 1.5
+  stt_language: es
+  stt_model: small
+  tts_rate: +0%
+  tts_voice: es-CO-SalomeNeural
+  tts_volume: +0%
+  wake_threshold: 0.5
+  wake_word_models:
+  - hey_jarvis

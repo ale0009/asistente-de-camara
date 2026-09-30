@@ -1,3 +1,4 @@
+import os
 import sys
 import logging
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
@@ -15,11 +16,16 @@ class NovaTrayApp:
         self.app = app
         self.dispatcher = dispatcher
         self.on_exit = on_exit
+        self._exit_done = False
+        self.app.aboutToQuit.connect(self._handle_exit)
         self.tray_icon = QSystemTrayIcon(self.app)
         
-        # Icono de la bandeja (se reemplazará cuando haya un asset definitivo)
+        # Icono de la bandeja
         try:
-            self.tray_icon.setIcon(QIcon("assets/nova_icon.png"))
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            icon_path = os.path.join(base_dir, "assets", "nova_icon.png")
+            if os.path.exists(icon_path):
+                self.tray_icon.setIcon(QIcon(icon_path))
         except Exception as e:
             logger.warning(f"No se pudo cargar el icono de la bandeja: {e}")
         self.tray_icon.setToolTip("NOVA - Asistente IA")
@@ -102,29 +108,28 @@ class NovaTrayApp:
         QTimer.singleShot(3000, pw.hide_listening)
         logger.info("Prueba de interfaz de escucha disparada manualmente.")
 
+    def _handle_exit(self):
+        if not getattr(self, "_exit_done", False):
+            self._exit_done = True
+            logger.info("Saliendo de NOVA y liberando recursos de hardware...")
+            if self.on_exit:
+                try:
+                    self.on_exit()
+                except Exception:
+                    logger.exception("Error ejecutando on_exit antes de salir")
+
     def exit_app(self):
-        logger.info("Saliendo de NOVA...")
-        # Antes esto llamaba QCoreApplication.quit() directo, sin garantizar
-        # que NovaAssistant.stop() corriera (cámara/voz/hilos quedaban sin
-        # liberar de forma ordenada — en particular, la cámara nunca recibía
-        # el comando de suspensión). Ahora se ejecuta explícitamente antes de
-        # cerrar Qt.
-        if self.on_exit:
-            try:
-                self.on_exit()
-            except Exception:
-                logger.exception("Error ejecutando on_exit antes de salir")
+        self._handle_exit()
         QCoreApplication.quit()
 
 def run_ui(dispatcher=None, on_exit=None):
     """Arranca la QApplication y la bandeja. Se pasa opcionalmente el dispatcher.
     El dispatcher proviene de main.py y contiene toda la lógica de comandos.
-    on_exit (opcional) se llama justo antes de cerrar Qt cuando el usuario
-    sale por el menú de bandeja — main.py lo usa para garantizar un apagado
-    ordenado (NovaAssistant.stop()).
+    on_exit se invoca cuando la app se cierra (sea por la ventana o por la bandeja),
+    garantizando un apagado ordenado (NovaAssistant.stop()).
     """
     app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False)
+    app.setQuitOnLastWindowClosed(True)
     nova_tray = NovaTrayApp(app, dispatcher, on_exit=on_exit)
     nova_tray.start()
     return app.exec()

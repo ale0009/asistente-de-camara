@@ -12,4 +12,6 @@ logs/*.db
 .gradle/
 node_modules/
 .aistudio/
+.venv/
+*.db
 

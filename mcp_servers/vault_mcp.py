@@ -20,7 +20,7 @@ class OverwriteError(PermissionError):
 PROTECTED_KEYWORDS = ["charter", "adr", "acta", "actas", "hito", "hitos", "intent_note"]
 
 class ObsidianVaultMCPServer:
-    def __init__(self, vault_path: str = "D:\\Documentos\\Obsidian Vault"):
+    def __init__(self, vault_path: str = "/home/alejandro/Datos/Vault-Obsidian"):
         # `resolve()` también normaliza `..` y enlaces simbólicos. Guardar la
         # raíz normalizada permite comprobar de forma fiable que una petición
         # no escape del vault (por ejemplo: ../../Users/... ).
@@ -238,27 +238,44 @@ class ObsidianVaultMCPServer:
             return {"success": False, "projects": [], "error": "Vault no encontrado."}
 
         projects = []
-        try:
-            # 1. Carpetas de primer nivel como proyectos potenciales
-            for item in self._vault_root.iterdir():
-                if item.is_dir() and not item.name.startswith("."):
-                    md_files = list(item.glob("**/*.md"))
-                    if md_files:
-                        projects.append({
-                            "name": item.name,
-                            "type": "folder_project",
-                            "note_count": len(md_files),
-                            "path": item.name
-                        })
+        seen_names = set()
+        system_folders = {
+            "00 - gobernanza", "00_inbox", "02_conocimiento", "03_plantillas",
+            "04_diagramas", "conocimiento", "libros", "_sistema", ".obsidian",
+            ".agents", ".claude", ".codex"
+        }
 
-            # 2. Notas en la raíz del Vault
-            for item in self._vault_root.glob("*.md"):
-                projects.append({
-                    "name": item.stem,
-                    "type": "master_document",
-                    "note_count": 1,
-                    "path": item.name
-                })
+        try:
+            # 1. Explorar dentro de carpetas dedicadas a proyectos (proyectos, 01_Proyectos)
+            for container_name in ["proyectos", "01_Proyectos", "01_proyectos"]:
+                container = self._vault_root / container_name
+                if container.is_dir():
+                    for item in sorted(container.iterdir()):
+                        if item.is_dir() and not item.name.startswith(".") and not item.name.startswith("_"):
+                            md_files = list(item.glob("**/*.md"))
+                            if item.name not in seen_names:
+                                seen_names.add(item.name)
+                                projects.append({
+                                    "name": item.name,
+                                    "type": "project",
+                                    "note_count": len(md_files),
+                                    "path": f"{container_name}/{item.name}"
+                                })
+
+            # 2. Otras carpetas de primer nivel que puedan ser proyectos directos
+            for item in sorted(self._vault_root.iterdir()):
+                if item.is_dir() and not item.name.startswith(".") and not item.name.startswith("_"):
+                    if item.name.lower() not in system_folders and item.name not in ["proyectos", "01_Proyectos", "01_proyectos"]:
+                        if item.name not in seen_names:
+                            md_files = list(item.glob("**/*.md"))
+                            if md_files:
+                                seen_names.add(item.name)
+                                projects.append({
+                                    "name": item.name,
+                                    "type": "folder_project",
+                                    "note_count": len(md_files),
+                                    "path": item.name
+                                })
         except Exception as e:
             return {"success": False, "error": f"Error listando proyectos: {e}"}
 

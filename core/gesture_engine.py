@@ -2,6 +2,7 @@ import os
 import time
 import math
 import logging
+from typing import Optional, Tuple
 
 import cv2
 import mediapipe as mp
@@ -47,10 +48,9 @@ class GestureEngine:
         try:
             options = HandLandmarkerOptions(
                 base_options=BaseOptions(model_asset_path=MODEL_PATH),
-                running_mode=RunningMode.VIDEO,
-                num_hands=2,
+                running_mode=RunningMode.IMAGE,
+                num_hands=1,
                 min_hand_detection_confidence=0.7,
-                min_tracking_confidence=0.5,
             )
             self.landmarker = HandLandmarker.create_from_options(options)
             self.enabled = True
@@ -63,34 +63,43 @@ class GestureEngine:
         # Estado para evitar disparos múltiples rápidos (debounce)
         self.last_gesture = None
         self.frames_with_same_gesture = 0
-        self.activation_frames = 15  # Aprox 0.5s a 30fps
+        self.activation_frames = 5  # Aprox 0.5s a 10fps de inferencia
+        self._frame_count = 0
+        self._last_landmarks = None
+        self._last_action_time = 0.0
 
     def process_frame(self, frame):
-        """Procesa un frame BGR de OpenCV y busca manos."""
-        if frame is None or not self.enabled:
+        """Procesa un frame BGR de OpenCV y busca manos de forma optimizada."""
+        if frame is None:
+            return None
+        if not self.enabled:
             return frame
 
-        # Convertir a RGB (MediaPipe usa RGB) y voltear para efecto espejo
-        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        image_rgb = cv2.flip(image_rgb, 1)
+        self._frame_count += 1
+        # Espejo en BGR para vista natural tipo selfie
+        mirrored = cv2.flip(frame, 1)
 
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_rgb)
-        timestamp_ms = int((time.time() - self._start_time) * 1000)
-        result = self.landmarker.detect_for_video(mp_image, timestamp_ms)
+        # Muestreo cada 3 frames (~10 FPS para MediaPipe): reduce drásticamente el uso de CPU
+        if self._frame_count % 3 == 0:
+            image_rgb = cv2.cvtColor(mirrored, cv2.COLOR_BGR2RGB)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_rgb)
+            try:
+                result = self.landmarker.detect(mp_image)
+                if result.hand_landmarks:
+                    self._last_landmarks = result.hand_landmarks[0]
+                    detected_gesture = self._recognize_gesture(self._last_landmarks)
+                else:
+                    self._last_landmarks = None
+                    detected_gesture = None
+                self._debounce_gesture(detected_gesture)
+            except Exception as e:
+                logger.debug(f"MediaPipe frame skip: {e}")
 
-        image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+        # Dibujar landmarks sobre el frame actual si existen
+        if self._last_landmarks:
+            self._draw_landmarks(mirrored, self._last_landmarks)
 
-        detected_gesture = None
-        if result.hand_landmarks:
-            # Tomamos el gesto de la primera mano detectada por ahora
-            landmarks = result.hand_landmarks[0]
-            self._draw_landmarks(image_bgr, landmarks)
-            detected_gesture = self._recognize_gesture(landmarks)
-
-        self._debounce_gesture(detected_gesture)
-
-        # Volver a voltear para que el usuario se vea bien
-        return cv2.flip(image_bgr, 1)
+        return mirrored
 
     def _draw_landmarks(self, image, landmarks):
         """Dibuja el esqueleto de la mano y marca sutilmente el centro de encuadre."""
@@ -105,6 +114,41 @@ class GestureEngine:
         # Guía de encuadre en el tercio superior
         guide_y = int(h * 0.33)
         cv2.line(image, (0, guide_y), (w, guide_y), (0, 229, 255), 1)
+
+    def get_pointed_coordinates(self) -> Optional[tuple]:
+        """Devuelve las coordenadas normalizadas (x, y) de la punta del índice si hay una mano detectada."""
+        if self._last_landmarks and len(self._last_landmarks) > INDEX_TIP:
+            lm = self._last_landmarks[INDEX_TIP]
+            # lm.x está en el frame 'mirrored', por lo que invertimos x para mapear al frame original de cámara
+            orig_x = 1.0 - lm.x
+            orig_y = lm.y
+            return (orig_x, orig_y)
+        return None
+
+    def get_foveated_crop(self, frame, crop_size: int = 448):
+        """
+        Extrae un recorte centrado en la punta del dedo que señala (Visión Foveada).
+        Si no se está señalando activamente, devuelve el frame completo o recorte central.
+        """
+        if frame is None:
+            return None
+
+        h, w = frame.shape[:2]
+        coords = self.get_pointed_coordinates()
+        
+        if coords:
+            cx = int(coords[0] * w)
+            cy = int(coords[1] * h)
+        else:
+            cx, cy = w // 2, h // 2
+
+        half = crop_size // 2
+        x1 = max(0, min(w - crop_size, cx - half))
+        y1 = max(0, min(h - crop_size, cy - half))
+        x2 = min(w, x1 + crop_size)
+        y2 = min(h, y1 + crop_size)
+
+        return frame[y1:y2, x1:x2]
 
     def _recognize_gesture(self, landmarks):
         """
@@ -185,11 +229,14 @@ class GestureEngine:
         if current_gesture == self.last_gesture and current_gesture is not None:
             self.frames_with_same_gesture += 1
 
-            # Disparar solo una vez cuando alcanza los frames
+            # Disparar solo una vez cuando alcanza los frames y respeta el cooldown de 2s
             if self.frames_with_same_gesture == self.activation_frames:
-                logger.info(f"Gesto consolidado: {current_gesture}")
-                if self.on_gesture_detected:
-                    self.on_gesture_detected(current_gesture)
+                now = time.time()
+                if now - self._last_action_time > 2.0:
+                    self._last_action_time = now
+                    logger.info(f"Gesto consolidado: {current_gesture}")
+                    if self.on_gesture_detected:
+                        self.on_gesture_detected(current_gesture)
         else:
             # Gesto cambió o es None
             self.last_gesture = current_gesture

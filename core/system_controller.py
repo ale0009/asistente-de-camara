@@ -4,14 +4,23 @@ import datetime
 import logging
 import threading
 import subprocess
-import pyautogui
-import psutil
-import win32gui
-import win32con
-import win32process
-from ctypes import cast, POINTER
-from comtypes import CLSCTX_ALL
-from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+import platform
+
+IS_WINDOWS = platform.system() == "Windows"
+
+if IS_WINDOWS:
+    try:
+        import pyautogui
+        import win32gui
+        import win32con
+        import win32process
+        from ctypes import cast, POINTER
+        from comtypes import CLSCTX_ALL
+        from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+    except ImportError:
+        pass
+else:
+    pyautogui = None
 
 logger = logging.getLogger(__name__)
 
@@ -32,22 +41,39 @@ class SystemController:
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         filename = os.path.join(self.screenshots_dir, f"Captura_{timestamp}.png")
         try:
-            screenshot = pyautogui.screenshot()
-            screenshot.save(filename)
-            logger.info(f"Captura guardada: {filename}")
-            return f"Captura de pantalla guardada"
+            if not IS_WINDOWS:
+                # En Linux Fedora / KDE Plasma Wayland usamos spectacle
+                res = subprocess.run(["spectacle", "-b", "-n", "-o", filename], capture_output=True)
+                if res.returncode == 0:
+                    logger.info(f"Captura guardada: {filename}")
+                    return f"Captura de pantalla guardada"
+
+            if pyautogui:
+                screenshot = pyautogui.screenshot()
+                screenshot.save(filename)
+                logger.info(f"Captura guardada: {filename}")
+                return f"Captura de pantalla guardada"
+            return "No hay herramienta de captura disponible"
         except Exception as e:
             logger.error(f"Error tomando captura: {e}")
             return "Error al tomar la captura de pantalla"
 
     def change_volume(self, increase: bool = True, step: float = 0.1):
-        """Aumenta o disminuye el volumen general del sistema simulando las teclas multimedia."""
+        """Aumenta o disminuye el volumen general del sistema."""
         try:
-            # step 0.1 ~ 10% = usualmente 5 pulsaciones de tecla (cada una es 2%)
+            if not IS_WINDOWS:
+                delta = "5%+" if increase else "5%-"
+                subprocess.run(["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", delta], check=False)
+                action = "subido" if increase else "bajado"
+                logger.info(f"Volumen {action} vía wpctl")
+                return f"Volumen {action}"
+
+            # Windows logic
             presses = max(1, int(step * 50))
             key = 'volumeup' if increase else 'volumedown'
             for _ in range(presses):
-                pyautogui.press(key)
+                if pyautogui:
+                    pyautogui.press(key)
                 
             action = "subido" if increase else "bajado"
             logger.info(f"Volumen {action} simulando tecla {key}")
@@ -59,7 +85,13 @@ class SystemController:
     def mute_volume(self):
         """Silencia o reactiva el audio del sistema."""
         try:
-            pyautogui.press('volumemute')
+            if not IS_WINDOWS:
+                subprocess.run(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"], check=False)
+                logger.info("Audio silenciado/reactivado vía wpctl")
+                return "Audio silenciado o reactivado"
+
+            if pyautogui:
+                pyautogui.press('volumemute')
             logger.info("Tecla de Mute simulada")
             return "Audio silenciado o reactivado"
         except Exception as e:
@@ -67,8 +99,14 @@ class SystemController:
             return "Hubo un error con el control de audio"
 
     def set_volume(self, percentage: float) -> str:
-        """Ajusta el volumen general del sistema a un porcentaje específico (0 a 100) usando pycaw."""
+        """Ajusta el volumen general del sistema a un porcentaje específico (0 a 100)."""
         try:
+            if not IS_WINDOWS:
+                vol_frac = max(0.0, min(1.5, percentage / 100.0))
+                subprocess.run(["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{vol_frac:.2f}"], check=False)
+                logger.info(f"Volumen ajustado con wpctl al {percentage}%")
+                return f"Volumen ajustado al {int(percentage)} por ciento"
+
             import pythoncom
             pythoncom.CoInitialize()
             try:
@@ -76,14 +114,13 @@ class SystemController:
                 interface = devices.Activate(
                     IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
                 volume = cast(interface, POINTER(IAudioEndpointVolume))
-                # SetMasterVolumeLevelScalar acepta float de 0.0 a 1.0
                 volume.SetMasterVolumeLevelScalar(percentage / 100.0, None)
                 logger.info(f"Volumen ajustado con pycaw al {percentage}%")
                 return f"Volumen ajustado al {int(percentage)} por ciento"
             finally:
                 pythoncom.CoUninitialize()
         except Exception as e:
-            logger.error(f"Error ajustando volumen con pycaw: {e}")
+            logger.error(f"Error ajustando volumen: {e}")
             return "No pude ajustar el volumen general"
 
     def close_application(self, app_name: str) -> str:

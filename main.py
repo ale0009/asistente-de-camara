@@ -1,7 +1,23 @@
-import logging
 import os
-import yaml
 import sys
+
+# Limitar hilos internos de librerías C++/TFLite/ONNX para evitar sobrecarga en CPU
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["TF_NUM_INTRAOP_THREADS"] = "1"
+os.environ["TF_NUM_INTEROP_THREADS"] = "1"
+
+try:
+    import cv2
+    cv2.setNumThreads(1)
+except Exception:
+    pass
+
+import logging
+import yaml
 import time
 import threading
 from logging.handlers import RotatingFileHandler
@@ -97,6 +113,7 @@ class NovaAssistant:
         self.voice = VoiceEngine(self.config['voice'])
         self.dispatcher.voice = self.voice
         self.gestures = GestureEngine(self.config['gestures'])
+        self.dispatcher.gesture_engine = self.gestures
         self.gesture_commands = self._load_yaml("presets/gestures.yaml").get('gestures', {})
 
         # Conectar callbacks
@@ -215,6 +232,11 @@ class NovaAssistant:
             return
 
         logger.info(f"Procesando acción para gesto: {gesture} -> '{command_text}'")
+        try:
+            from ui.panel_widget import show_toast
+            show_toast(f"Gesto: {gesture}", f"Ejecutando: {command_text}", success=True)
+        except Exception:
+            pass
         action_taken = self.dispatcher.process_command(command_text)
 
         if self.config['obsidian']['log_gestures']:
@@ -231,18 +253,17 @@ class NovaAssistant:
         while self.is_running:
             try:
                 frame = self.camera.get_frame()
+                import ui.panel_widget as pw
                 if frame is not None:
                     # Procesar frame para gestos (devuelve el frame pintado opcionalmente)
-                    processed_frame = self.gestures.process_frame(frame)
-
-                    # Enviar frame a la UI si el panel está abierto. Se usa
-                    # update_video_frame_safe (no acceso directo a
-                    # _panel_instance) porque este hilo NO es el hilo de Qt —
-                    # llamar métodos de un QWidget fuera del hilo de Qt es
-                    # comportamiento indefinido, no solo un riesgo de
-                    # RuntimeError por objeto destruido.
-                    import ui.panel_widget as pw
+                    if getattr(self.dispatcher, "gestures_active", True):
+                        processed_frame = self.gestures.process_frame(frame)
+                    else:
+                        processed_frame = cv2.flip(frame, 1)
                     pw.update_video_frame_safe(processed_frame)
+                else:
+                    pw.update_video_frame_safe(None)
+                    time.sleep(0.12) # Ahorro de CPU mientras la cámara está suspendida
             except Exception:
                 logger.exception("Error inesperado procesando un frame; se continúa con el siguiente.")
 
@@ -277,10 +298,10 @@ class NovaAssistant:
         # Log de inicio
         self.logger_db.log_action("Sistema", "NOVA iniciada exitosamente")
         
-        # Registrar atajo global Ctrl+Alt+N
+        # Registrar atajo global Ctrl+Alt+N (solo en plataformas soportadas)
         self._setup_global_hotkey()
 
-        # Verificación asíncrona de salud de Ollama e inicio de UI
+        # Verificación asíncrona de salud de Ollama
         def _check_health():
             time.sleep(2.5)
             ollama_ok = self.ollama.check_connection() if self.ollama else False
@@ -291,8 +312,23 @@ class NovaAssistant:
                 pw.show_toast("NOVA Sistema", "Cámara lista. Ollama fuera de línea.", success=False)
         threading.Thread(target=_check_health, daemon=True, name="NOVA-HealthCheck").start()
 
+        # Iniciar UI. on_exit se llama desde el menú "Salir" de la bandeja,
+        # ANTES de que Qt cierre la aplicación — es la única vía real de
+        # cierre hoy (setQuitOnLastWindowClosed(False) impide que cerrar el
+        # panel por sí solo termine el proceso), pero self.stop() es
+        # idempotente por si en el futuro hay más de un camino de salida.
+        logger.info("Iniciando Interfaz de Usuario...")
+        run_ui(self.dispatcher, on_exit=self.stop)
+
+        # Red de seguridad: si run_ui() retornara por una vía que no pasó
+        # por on_exit, igual se libera todo (stop() no hace nada la segunda vez).
+        self.stop()
+
     def _setup_global_hotkey(self):
         """Registra un hotkey global en Windows (Ctrl+Alt+N) para activar la escucha de NOVA."""
+        if sys.platform != "win32":
+            return
+
         try:
             import ctypes
             import ctypes.wintypes
@@ -322,18 +358,6 @@ class NovaAssistant:
         except Exception as e:
             logger.warning(f"Error configurando atajo global: {e}")
 
-        # Iniciar UI. on_exit se llama desde el menú "Salir" de la bandeja,
-        # ANTES de que Qt cierre la aplicación — es la única vía real de
-        # cierre hoy (setQuitOnLastWindowClosed(False) impide que cerrar el
-        # panel por sí solo termine el proceso), pero self.stop() es
-        # idempotente por si en el futuro hay más de un camino de salida.
-        logger.info("Iniciando Interfaz de Usuario...")
-        run_ui(self.dispatcher, on_exit=self.stop)
-
-        # Red de seguridad: si run_ui() retornara por una vía que no pasó
-        # por on_exit, igual se libera todo (stop() no hace nada la segunda vez).
-        self.stop()
-
     def stop(self):
         if getattr(self, "_stopped", False):
             return
@@ -351,6 +375,11 @@ class NovaAssistant:
         # escuchando (ver HANDOVER.md §5, el switch OSC de OBSBOT Center).
         self.osc.sleep_camera()
         self.camera.stop()
+        try:
+            import ui.panel_widget as pw
+            pw.update_camera_state_safe(False)
+        except Exception:
+            pass
 
         if hasattr(self, "vision_thread") and self.vision_thread.is_alive():
             self.vision_thread.join(timeout=2.0)
@@ -358,6 +387,26 @@ class NovaAssistant:
         self.logger_db.log_action("Sistema", "NOVA apagada")
         logger.info("NOVA se ha apagado correctamente.")
 
+_lock_file = None
+
+def check_single_instance() -> bool:
+    global _lock_file
+    try:
+        import fcntl
+        lock_path = "/tmp/nova_assistant.lock"
+        _lock_file = open(lock_path, "w")
+        fcntl.flock(_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except (IOError, BlockingIOError):
+        return False
+    except Exception:
+        return True
+
 if __name__ == "__main__":
+    if sys.platform != "win32":
+        if not check_single_instance():
+            logger.warning("Ya existe una instancia de NOVA en ejecución. Saliendo.")
+            print("NOVA ya está en ejecución.")
+            sys.exit(0)
     nova = NovaAssistant()
     nova.start()

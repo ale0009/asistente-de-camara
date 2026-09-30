@@ -1,62 +1,67 @@
-import cv2
+import os
+import platform
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Optional
+import cv2
 
 logger = logging.getLogger(__name__)
 
 
 def find_camera_index_by_name(name_substring: str) -> Optional[int]:
-    """Busca el índice DirectShow de una cámara por nombre de dispositivo.
-
-    El índice numérico que usa cv2.VideoCapture(i, cv2.CAP_DSHOW) depende del
-    orden de enumeración de Windows, que puede cambiar solo entre sesiones
-    (ya pasó: el OBSBOT saltó de índice 1 a 0 sin razón aparente). pygrabber
-    enumera los mismos dispositivos DirectShow por nombre, así que resolver
-    el índice por nombre en cada arranque evita depender de ese orden.
-    Devuelve None si pygrabber no está disponible o no encuentra coincidencia
-    (el llamador debe usar camera_index de config.yaml como fallback).
-    """
+    """Busca el índice de una cámara por nombre de dispositivo."""
     if not name_substring:
         return None
-    try:
-        from pygrabber.dshow_graph import FilterGraph
-        import pythoncom
-    except ImportError:
-        logger.warning("pygrabber no está instalado; no se puede detectar la cámara por nombre.")
-        return None
-
-    # pygrabber usa COM (vía comtypes) y COM requiere que CADA hilo que lo usa
-    # llame CoInitialize primero — el hilo principal lo tiene inicializado
-    # implícitamente (comtypes lo hace al importarse por primera vez), pero
-    # el hilo de captura de la cámara (usado al reconectar tras una
-    # desconexión) no, y sin esto fallaba con
-    # "[WinError -2147221008] No se ha llamado a CoInitialize". Llamar
-    # CoInitialize/CoUninitialize en pareja es seguro incluso si el hilo ya
-    # lo tenía inicializado (devuelve S_FALSE, no es un error).
-    pythoncom.CoInitialize()
-    try:
-        devices = FilterGraph().get_input_devices()
-    except Exception as e:
-        logger.warning(f"No se pudo enumerar cámaras DirectShow: {e}")
-        return None
-    finally:
-        pythoncom.CoUninitialize()
-
+    cameras = get_available_cameras()
     name_lower = name_substring.lower()
-    for index, device_name in enumerate(devices):
+    for index, device_name in cameras.items():
         if name_lower in device_name.lower():
             logger.info(f"Cámara '{device_name}' encontrada por nombre en índice {index}.")
             return index
-
-    logger.warning(f"Ninguna cámara con nombre que contenga '{name_substring}' encontrada.")
     return None
 
 
 def get_available_cameras() -> dict:
-    """Devuelve un diccionario {índice: nombre_cámara} con las cámaras DirectShow conectadas al sistema."""
+    """Devuelve un diccionario {índice: nombre_cámara} con las cámaras conectadas al sistema."""
     cameras = {}
+    if platform.system() != "Windows":
+        v4l_path = Path("/sys/class/video4linux")
+        if v4l_path.exists():
+            import fcntl, struct
+            VIDIOC_QUERYCAP = 0x80685600
+            V4L2_CAP_VIDEO_CAPTURE = 0x00000001
+            V4L2_CAP_META_CAPTURE = 0x00800000
+            for dev in sorted(v4l_path.glob("video*")):
+                try:
+                    idx = int(dev.name.replace("video", ""))
+                    dev_path = f"/dev/video{idx}"
+                    if not os.path.exists(dev_path):
+                        continue
+                    fd = os.open(dev_path, os.O_RDWR | os.O_NONBLOCK)
+                    buf = bytearray(104)
+                    fcntl.ioctl(fd, VIDIOC_QUERYCAP, buf)
+                    os.close(fd)
+                    driver, card, bus, ver, caps, dev_caps = struct.unpack('16s32s32sIII', buf[:92])
+                    card_name = card.decode('utf-8', 'ignore').rstrip('\x00')
+                    # Solo considerar dispositivos de captura de video real, descartando nodos de metadatos UVC
+                    if (dev_caps & V4L2_CAP_VIDEO_CAPTURE) and not (dev_caps & V4L2_CAP_META_CAPTURE):
+                        cameras[idx] = card_name if card_name else f"Cámara #{idx}"
+                except Exception:
+                    pass
+        if not cameras:
+            for i in range(2):
+                try:
+                    cap = cv2.VideoCapture(i, cv2.CAP_V4L2)
+                    if cap.isOpened():
+                        cameras[i] = f"Cámara Video #{i}"
+                        cap.release()
+                except Exception:
+                    pass
+        return cameras
+
+    # Windows DirectShow
     try:
         from pygrabber.dshow_graph import FilterGraph
         import pythoncom
@@ -70,7 +75,6 @@ def get_available_cameras() -> dict:
     except Exception as e:
         logger.warning(f"No se pudieron enumerar cámaras con pygrabber ({e}). Probando escaneo DirectShow...")
 
-    # Si pygrabber no devolvió nada, hacer escaneo secundario con cv2
     if not cameras:
         for i in range(4):
             cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
@@ -173,8 +177,11 @@ class CameraController:
         else:
             logger.info(f"Usando camera_index de config.yaml como fallback: {self.camera_index}")
 
-        logger.info(f"Intentando abrir cámara en índice {self.camera_index} (DirectShow)...")
-        cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
+        backend = cv2.CAP_DSHOW if platform.system() == "Windows" else cv2.CAP_V4L2
+        backend_name = "DirectShow" if platform.system() == "Windows" else "V4L2"
+
+        logger.info(f"Intentando abrir cámara en índice {self.camera_index} ({backend_name})...")
+        cap = cv2.VideoCapture(self.camera_index, backend)
 
         if cap.isOpened():
             ret, _ = cap.read()
@@ -182,20 +189,20 @@ class CameraController:
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
                 self.cap = cap
-                logger.info(f"¡Cámara abierta exitosamente en índice {self.camera_index} (DirectShow)!")
+                logger.info(f"¡Cámara abierta exitosamente en índice {self.camera_index} ({backend_name})!")
                 return True
             cap.release()
 
-        # Reintento 1: Probar Media Foundation (MSMF) si DirectShow falla por bloqueo
-        logger.info(f"DirectShow falló en índice {self.camera_index}; probando Media Foundation (MSMF)...")
-        cap = cv2.VideoCapture(self.camera_index, cv2.CAP_MSMF)
+        # Reintento 1: Probar backend genérico si el específico falla
+        logger.info(f"{backend_name} falló en índice {self.camera_index}; probando backend por defecto...")
+        cap = cv2.VideoCapture(self.camera_index)
         if cap.isOpened():
             ret, _ = cap.read()
             if ret:
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
                 self.cap = cap
-                logger.info(f"¡Cámara abierta exitosamente en índice {self.camera_index} (MSMF)!")
+                logger.info(f"¡Cámara abierta exitosamente en índice {self.camera_index} (Default)!")
                 return True
             cap.release()
 
@@ -206,7 +213,7 @@ class CameraController:
             if idx == self.camera_index:
                 continue
             logger.info(f"Probando cámara alternativa en índice {idx} ({avail[idx]})...")
-            cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+            cap = cv2.VideoCapture(idx, backend)
             if cap.isOpened():
                 ret, _ = cap.read()
                 if ret:
@@ -272,6 +279,8 @@ class CameraController:
                 continue
 
             consecutive_failures += 1
+            if not self.is_running:
+                break
             logger.warning("Fallo al leer frame de la cámara")
 
             if consecutive_failures < RECONNECT_AFTER_FAILURES:
@@ -299,28 +308,27 @@ class CameraController:
         """Detiene la captura y libera recursos."""
         logger.info("Deteniendo cámara...")
         self.is_running = False
+
+        # Liberar el dispositivo V4L2/DSHOW inmediatamente para apagar el LED
+        # físico de la cámara sin esperar bloqueado en join().
+        cap = self.cap
+        self.cap = None
+        if cap:
+            try:
+                cap.release()
+            except Exception as e:
+                logger.warning(f"Error liberando cap en stop(): {e}")
+
         if self._thread:
-            # El timeout cubre el peor caso de una reconexión en curso:
-            # cv2.VideoCapture con DSHOW puede tardar varios segundos en
-            # abrir. Con un timeout corto, el hilo podía terminar de abrir el
-            # dispositivo DESPUÉS de que stop() ya había revisado self.cap,
-            # dejando un handle de cámara abierto y sin liberar — la cámara
-            # seguía transmitiendo/encendida pese a que NOVA ya reportaba
-            # "Cámara detenida".
-            self._thread.join(timeout=6.0)
+            self._thread.join(timeout=2.0)
             if self._thread.is_alive():
                 logger.warning(
-                    "El hilo de captura no terminó a tiempo (posiblemente reabriendo "
-                    "el dispositivo); la cámara podría quedar sin liberar correctamente."
+                    "El hilo de captura no terminó a tiempo."
                 )
-
-        if self.cap:
-            self.cap.release()
-            self.cap = None
 
         with self._frame_lock:
             self.current_frame = None
-        logger.info("Cámara detenida.")
+        logger.info("Cámara detenida y hardware liberado.")
 
 if __name__ == "__main__":
     # Prueba rápida
