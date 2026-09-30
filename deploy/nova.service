@@ -1,0 +1,17 @@
+[Unit]
+Description=NOVA 2.0 - Ambient Workstation Copilot Daemon
+Documentation=https://github.com/ale0009/asistente-de-camara
+After=graphical-session.target default.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Datos/Projects/asistente-de-camara
+ExecStart=%h/Datos/Projects/asistente-de-camara/.venv/bin/python -m core.daemon
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+KillMode=process
+
+[Install]
+WantedBy=default.target

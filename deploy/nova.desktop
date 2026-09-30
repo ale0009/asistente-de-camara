@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=NOVA
+GenericName=Copiloto de Estación de Trabajo Linux
+Comment=Paleta Spotlight HUD y Copiloto Silencioso para Terminal, Git y Hardware
+Exec=/home/alejandro/.local/bin/nova
+Icon=/home/alejandro/Datos/Projects/asistente-de-camara/assets/nova_icon.png
+Path=/home/alejandro/Datos/Projects/asistente-de-camara
+Terminal=false
+Categories=Utility;Development;
+StartupNotify=false
+X-KDE-GlobalAccel-CommandShortcut=true
