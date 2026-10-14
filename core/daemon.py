@@ -89,6 +89,7 @@ class NovaDaemon:
         self.ipc.register_handler("voice_query", self._handle_voice_query)
         self.ipc.register_handler("speak", self._handle_speak)
         self.ipc.register_handler("todo_radar", self._handle_todo_radar)
+        self.ipc.register_handler("node_status", self._handle_node_status)
 
     async def _handle_ping(self, req: Dict[str, Any]) -> Dict[str, Any]:
         uptime_sec = int(time.time() - self.start_time)
@@ -96,8 +97,12 @@ class NovaDaemon:
             "status": "online",
             "uptime_seconds": uptime_sec,
             "version": "2.0-workstation",
-            "telemetry": self.governor.get_telemetry()
+            "telemetry": self.governor.get_telemetry(),
+            "node_status": self.governor.get_node_status()
         }
+
+    async def _handle_node_status(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        return self.governor.get_node_status()
 
     async def _handle_query(self, req: Dict[str, Any]) -> str:
         prompt = req.get("text", "").strip()

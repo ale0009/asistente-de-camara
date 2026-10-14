@@ -64,6 +64,29 @@ class HardwareGovernor:
 
         return telemetry
 
+    def get_node_status(self) -> Dict[str, Any]:
+        """Informa si el copiloto está operando en modo local puro o con nodo remoto Tailscale."""
+        try:
+            from core.ollama_bridge import OllamaBridge
+            bridge = OllamaBridge()
+            remote_online = bridge.is_remote_available()
+            return {
+                "mode": "hybrid" if remote_online else "local",
+                "remote_online": remote_online,
+                "remote_host": bridge.remote_host,
+                "local_host": bridge.local_host,
+                "gpu_device": "NVIDIA GeForce GTX 1050 (3GB)",
+            }
+        except Exception as e:
+            logger.debug(f"Error consultando node_status: {e}")
+            return {
+                "mode": "local",
+                "remote_online": False,
+                "remote_host": "http://pc-principal:11434",
+                "local_host": "http://127.0.0.1:11434",
+                "gpu_device": "NVIDIA GeForce GTX 1050 (3GB)"
+            }
+
     def get_loaded_ollama_models(self) -> List[str]:
         """Consulta qué modelos están ocupando memoria VRAM/RAM en Ollama."""
         try:

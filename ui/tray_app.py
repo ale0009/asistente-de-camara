@@ -73,12 +73,12 @@ class NovaTrayApp:
         if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
             self.toggle_spotlight_hud()
 
-    def toggle_spotlight_hud(self):
-        """Abre o enfoca la paleta Spotlight HUD."""
+    def toggle_spotlight_hud(self, mode: str = "search"):
+        """Abre o enfoca la paleta Spotlight HUD en modo buscador o scratchpad."""
         try:
             from ui.spotlight_hud import SpotlightHUD
             if self.hud_instance is None or not self.hud_instance.isVisible():
-                self.hud_instance = SpotlightHUD()
+                self.hud_instance = SpotlightHUD(initial_mode=mode)
                 self.hud_instance.show()
                 self.hud_instance.activateWindow()
                 self.hud_instance.raise_()
@@ -121,6 +121,17 @@ class NovaTrayApp:
         self.header_action = QAction("🛡 NOVA 2.0 Copiloto (Conectando...)")
         self.header_action.setEnabled(False)
         menu.addAction(self.header_action)
+        menu.addSeparator()
+
+        # Acceso directo a interfaces
+        a_hud = QAction("⚡ Paleta de Comandos y Proyectos (Meta+Space)", menu)
+        a_hud.triggered.connect(lambda: self.toggle_spotlight_hud(mode="search"))
+        menu.addAction(a_hud)
+
+        a_scratchpad = QAction("💬 Abrir Copiloto Scratchpad / Chat IA", menu)
+        a_scratchpad.triggered.connect(lambda: self.toggle_spotlight_hud(mode="scratchpad"))
+        menu.addAction(a_scratchpad)
+
         menu.addSeparator()
 
         # 1. Acciones Rápidas de Código
@@ -209,8 +220,9 @@ class NovaTrayApp:
         self.git_timer.start(30000)
 
     def _update_telemetry_header(self):
-        """Actualiza el texto de la cabecera del menú con telemetría viva."""
+        """Actualiza el texto de la cabecera del menú con telemetría viva y modo de cómputo."""
         res = send_ipc_command({"action": "telemetry"}, timeout=2.0)
+        res_node = send_ipc_command({"action": "node_status"}, timeout=1.5)
         if res.get("status") == "success":
             telem = res.get("result", {})
             cpu = telem.get("cpu_percent", 0)
@@ -218,7 +230,12 @@ class NovaTrayApp:
             vram_used = telem.get("gpu_vram_used_mb", 0)
             vram_tot = telem.get("gpu_vram_total_mb", 3072)
             gpu_temp = telem.get("gpu_temp_c", 0)
-            self.header_action.setText(f"🛡 NOVA · CPU: {cpu}% · RAM: {ram}% · GPU: {gpu_temp}°C ({vram_used}/{vram_tot} MB)")
+
+            node_info = res_node.get("result", {}) if res_node.get("status") == "success" else {}
+            is_hybrid = node_info.get("remote_online", False)
+            node_tag = "⚡ Remoto" if is_hybrid else "💻 Local"
+
+            self.header_action.setText(f"🛡 NOVA [{node_tag}] · CPU: {cpu}% · RAM: {ram}% · GPU: {gpu_temp}°C ({vram_used}/{vram_tot} MB)")
         else:
             self.header_action.setText("🛡 NOVA Copiloto (Demonio desconectado)")
 

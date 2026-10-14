@@ -119,12 +119,24 @@ def cmd_ask(prompt: str):
         print(f"{RED}✗ Error:{RESET} {res.get('message')}")
 
 
+def cmd_chat():
+    proj_dir = Path(__file__).resolve().parent.parent
+    venv_python = proj_dir / ".venv" / "bin" / "python"
+    hud_script = proj_dir / "ui" / "spotlight_hud.py"
+    subprocess.Popen([str(venv_python), str(hud_script), "--chat"], cwd=str(proj_dir))
+
+
 def cmd_telemetry():
     ensure_daemon_running()
     res = send_ipc_command({"action": "telemetry"})
+    res_node = send_ipc_command({"action": "node_status"})
     if res.get("status") == "success":
         t = res.get("result", {})
+        node = res_node.get("result", {}) if res_node.get("status") == "success" else {}
+        is_hybrid = node.get("remote_online", False)
+        node_str = f"{GREEN}Híbrido Remoto (PC Principal Conectado por Tailscale){RESET}" if is_hybrid else f"{CYAN}Local (GTX 1050 Pascal 3GB){RESET}"
         print(f"\n{BOLD}🛡 TELEMETRÍA DE ESTACIÓN DE TRABAJO (HP Pavilion){RESET}")
+        print(f"  Modo Cómputo:    {node_str}")
         print(f"  Procesador CPU:  {GREEN}{t.get('cpu_percent')}%{RESET}")
         print(f"  Memoria RAM:     {CYAN}{t.get('ram_percent')}% usado{RESET}")
         print(f"  GPU GTX 1050:    {YELLOW}{t.get('gpu_temp_c')} °C{RESET} (VRAM: {t.get('gpu_vram_used_mb')} / {t.get('gpu_vram_total_mb')} MB)")
@@ -257,6 +269,7 @@ def show_help():
 
 {BOLD}USO:{RESET}
   nova                         Abre la paleta de comandos Spotlight HUD
+  nova chat | scratchpad       Abre el copiloto interactivo flotante con streaming Markdown
   nova tray                    Inicia el icono en la bandeja del sistema (barra de tareas)
   nova talk | voice [segundos] Conversación por voz con Whisper GPU y Kokoro (Push-to-Talk)
   nova todos | radar           Genera el Radar de TODOs y Deuda Técnica en Obsidian
@@ -305,6 +318,8 @@ def main():
             print(f"{YELLOW}Uso: nova ask \"tu consulta aquí\"{RESET}")
             return
         cmd_ask(prompt)
+    elif subcmd in ["chat", "scratchpad"]:
+        cmd_chat()
     elif subcmd in ["status", "telemetry", "estado"]:
         cmd_telemetry()
     elif subcmd == "blender":
