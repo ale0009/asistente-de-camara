@@ -23,7 +23,7 @@ class QuickNoteIngester:
         self.inbox_dir = Path(inbox_dir)
         self.inbox_dir.mkdir(parents=True, exist_ok=True)
 
-    def save_note(self, content: str, title: str = "") -> Dict[str, Any]:
+    def save_note(self, content: str, title: str = "", source: str = "nova", **kwargs) -> Dict[str, Any]:
         """Guarda una nota en Markdown con metadatos estructurados en 00_Inbox."""
         content = content.strip()
         if not content:
@@ -47,9 +47,11 @@ class QuickNoteIngester:
         md_body = f"""---
 fecha: {timestamp_str}
 tipo: nota_rapida
+fuente: {source}
 tags:
   - inbox/rapido
   - nova
+  - fuente/{source}
 ---
 
 # {title}
